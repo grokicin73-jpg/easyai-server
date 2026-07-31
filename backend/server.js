@@ -8,7 +8,7 @@ import { mkdir } from "fs/promises";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp, cert } from "firebase-admin/app";
 import serviceAccount from "./easyai-bc97f-4e135dcd7bac.json" with { type: "json" };
-dotenv.config();
+dotenv.config({ path: '../.env' });
 initializeApp({
   credential: cert(serviceAccount),
 });
