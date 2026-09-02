@@ -15,15 +15,22 @@ const PORT = process.env.PORT || 3002;
 
 
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+const firebaseCredentials = JSON.parse(
+  process.env.FIREBASE_CREDENTIALS
+);
+
 initializeApp({
-  credential: cert("./easyai-bc97f-firebase-adminsdk-fbsvc-ac12d8de25.json")
+  credential: cert(firebaseCredentials),
 });
 
 const db = getFirestore();
 const androidPublisher = google.androidpublisher("v3");
+
 const googleAuth = new google.auth.GoogleAuth({
-  keyFile: "./easyai-bc97f-firebase-adminsdk-fbsvc-ac12d8de25.json",
+  credentials: firebaseCredentials,
   scopes: ["https://www.googleapis.com/auth/androidpublisher"],
 });
 const FREE_VIDEOS = 1;
