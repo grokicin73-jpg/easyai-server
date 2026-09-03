@@ -350,6 +350,7 @@ if (usage.freeVideosRemaining > 0) {
       
     });
   } catch (error) {
+    console.error("GENERATE VIDEO ERROR:", error);
 
     return res.status(500).json({
       success: false,
