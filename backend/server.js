@@ -4,7 +4,7 @@ import cors from "cors";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir, writeFile, readFile } from "fs/promises";
 import multer from "multer";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -18,9 +18,14 @@ const PORT = process.env.PORT || 3002;
 const GEMINI_API_KEY =
   process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
-const firebaseCredentials = JSON.parse(
-  process.env.FIREBASE_CREDENTIALS
-);
+const firebaseCredentials = process.env.FIREBASE_CREDENTIALS
+  ? JSON.parse(process.env.FIREBASE_CREDENTIALS)
+  : JSON.parse(
+      await readFile(
+        new URL("./easyai-bc97f-firebase-adminsdk-fbsvc-ac12d8de25.json", import.meta.url),
+        "utf8"
+      )
+    );
 
 initializeApp({
   credential: cert(firebaseCredentials),
