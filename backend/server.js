@@ -190,6 +190,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
       }
 
       console.log(`VEO temporary error ${response.status}. Retry ${attempt}/${retries}`);
+      if (response.status === 429) console.log("VEO 429 BODY:", await response.clone().text());
     } catch (error) {
       console.log(`VEO network error. Retry ${attempt}/${retries}:`, error.message);
 
