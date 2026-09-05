@@ -304,6 +304,7 @@ if (!deviceId) {
     error: "Device ID topilmadi.",
   });
 }
+console.log("DEVICE ID:", deviceId);
 
 const usage = await getUserUsage(deviceId);
 
