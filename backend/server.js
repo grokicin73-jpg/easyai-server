@@ -176,6 +176,36 @@ async function saveVideo(remoteVideoUrl, videoId) {
 
   return fileName;
 }
+async function fetchWithRetry(url, options = {}, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (
+        response.ok ||
+        ![429, 500, 502, 503, 504].includes(response.status)
+      ) {
+        return response;
+      }
+
+      console.log(`VEO temporary error ${response.status}. Retry ${attempt}/${retries}`);
+    } catch (error) {
+      console.log(`VEO network error. Retry ${attempt}/${retries}:`, error.message);
+
+      if (attempt === retries) {
+        throw error;
+      }
+    }
+
+    if (attempt < retries) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt * 5000)
+      );
+    }
+  }
+
+  throw new Error("Veo request failed after retries");
+}
 async function createVeoLiteVideo(prompt, imageFile = null) {
   const model = "veo-3.1-lite-generate-preview";
   const url =
@@ -192,7 +222,7 @@ async function createVeoLiteVideo(prompt, imageFile = null) {
   
   
 console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFile);
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: "POST",
     headers: {
       "x-goog-api-key": GEMINI_API_KEY,
@@ -227,7 +257,7 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
   for (let i = 0; i < 120; i++) {
     await new Promise((resolve) => setTimeout(resolve, 10000));
 
-    const statusResponse = await fetch(
+    const statusResponse = await fetchWithRetry(
       `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
       {
         headers: {
@@ -275,6 +305,11 @@ app.get("/health", (req, res) => {
 
 app.post("/api/generate-video", upload.single("image"), async (req, res) => {
   try {
+    console.log("UPLOAD DEBUG:", {
+  hasImage: !!req.file,
+  mimeType: req.file?.mimetype,
+  size: req.file?.size,
+});
     const prompt =
       typeof req.body?.prompt === "string"
         ? req.body.prompt.trim()
@@ -287,12 +322,7 @@ app.post("/api/generate-video", upload.single("image"), async (req, res) => {
       });
     }
 
-    if (prompt.length > 2048) {
-      return res.status(400).json({
-        success: false,
-        error: "Prompt juda uzun. 2048 belgidan oshirmang.",
-      });
-    }
+    
 const deviceId =
   typeof req.body?.deviceId === "string"
     ? req.body.deviceId.trim()
