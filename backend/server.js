@@ -44,6 +44,7 @@ const VIDEO_CREDIT_COST = 6;
 async function getUserUsage(userId) {
   const userRef = db.collection("users").doc(userId);
   const userDoc = await userRef.get();
+  console.log("FIRESTORE RAW USER:", userId, userDoc.exists, userDoc.data());
 
   if (!userDoc.exists) {
     const newUser = {
