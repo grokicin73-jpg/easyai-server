@@ -200,7 +200,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
 
     if (attempt < retries) {
       await new Promise((resolve) =>
-        setTimeout(resolve, attempt * 5000)
+        setTimeout(resolve, attempt * 65000)
       );
     }
   }
