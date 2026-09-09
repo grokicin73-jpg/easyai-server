@@ -291,8 +291,9 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
 
     if (statusData?.done === true) {
   const video =
-    statusData?.response?.generateVideoResponse
-      ?.generatedSamples?.[0]?.video;
+  statusData?.response?.generateVideoResponse
+    ?.generatedSamples?.[0]?.video ||
+  statusData?.response?.videos?.[0];
 
   const videoUrl = video?.uri;
   
