@@ -213,7 +213,7 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
   throw new Error("Veo request failed after retries");
 }
 async function createVeoLiteVideo(prompt, imageFile = null, attempt = 1) {
-  const model = "veo-3.1-lite-generate-001";
+  const model = "veo-3.1-lite-generate-preview";
 const projectId = "easyai-bc97f";
 const location = "us-central1";
 const url =
