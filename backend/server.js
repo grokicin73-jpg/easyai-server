@@ -290,11 +290,25 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
     }
 
     if (statusData?.done === true) {
-      const videoUrl =
-        statusData?.response?.generateVideoResponse
-          ?.generatedSamples?.[0]?.video?.uri;
+  const video =
+    statusData?.response?.generateVideoResponse
+      ?.generatedSamples?.[0]?.video;
 
-      if (!videoUrl) {
+  const videoUrl = video?.uri;
+  const videoBase64 =
+    video?.bytesBase64Encoded ||
+    video?.inlineData?.data ||
+    video?.data;
+
+  if (videoUrl) {
+    return videoUrl;
+  }
+
+  if (videoBase64) {
+    const mimeType = video?.mimeType || "video/mp4";
+    return `data:${mimeType};base64,${videoBase64}`;
+  }
+
   const errorCode = statusData?.error?.code;
 
   if (errorCode === 13 && attempt < 3) {
@@ -305,12 +319,9 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
     return createVeoLiteVideo(prompt, imageFile, attempt + 1);
   }
 
-  console.error("Veo video URL missing:", statusData);
-  throw new Error("Veo video URL missing");
+  console.error("Veo video data missing:", statusData);
+  throw new Error("Veo video data missing");
 }
-
-      return videoUrl;
-    }
   }
 
   throw new Error("Veo video timed out");
