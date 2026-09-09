@@ -295,10 +295,19 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
       ?.generatedSamples?.[0]?.video;
 
   const videoUrl = video?.uri;
-  const videoBase64 =
-    video?.bytesBase64Encoded ||
-    video?.inlineData?.data ||
-    video?.data;
+  
+    const videoBase64 =
+  video?.bytesBase64Encoded ||
+  video?.encodedVideo ||
+  video?.videoBytes ||
+  video?.inlineData?.data ||
+  video?.data ||
+  Object.entries(video || {}).find(
+    ([key, value]) =>
+      key !== "mimeType" &&
+      typeof value === "string" &&
+      value.length > 1000,
+  )?.[1];
 
   if (videoUrl) {
     return videoUrl;
