@@ -22,7 +22,7 @@ const firebaseCredentials = process.env.FIREBASE_CREDENTIALS
   ? JSON.parse(process.env.FIREBASE_CREDENTIALS)
   : JSON.parse(
       await readFile(
-        new URL("./easyai-bc97f-4e135dcd7bac.json", import.meta.url),
+        new URL("./easyai-bc97f-firebase-adminsdk-fbsvc-ac12d8de25.json", import.meta.url),
         "utf8"
       )
     );
@@ -32,10 +32,6 @@ initializeApp({
 });
 
 const db = getFirestore();
-const vertexAuth = new google.auth.GoogleAuth({
-  credentials: firebaseCredentials,
-  scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-});
 const androidPublisher = google.androidpublisher("v3");
 
 const googleAuth = new google.auth.GoogleAuth({
@@ -212,12 +208,10 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
 
   throw new Error("Veo request failed after retries");
 }
-async function createVeoLiteVideo(prompt, imageFile = null, attempt = 1) {
-  const model = "veo-3.1-lite-generate-001";
-const projectId = "easyai-bc97f";
-const location = "us-central1";
-const url =
-  `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
+async function createVeoLiteVideo(prompt, imageFile = null) {
+  const model = "veo-3.1-lite-generate-preview";
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:predictLongRunning`;
 
   const instance = { prompt };
 
@@ -228,14 +222,12 @@ const url =
   };
 }
   
- const authClient = await vertexAuth.getClient();
-const accessToken = await authClient.getAccessToken();
-console.log("TOKEN BOR:", !!(accessToken.token || accessToken)); 
+  
 console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFile);
   const response = await fetchWithRetry(url, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${accessToken.token || accessToken}`,
+      "x-goog-api-key": GEMINI_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -268,18 +260,13 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
     await new Promise((resolve) => setTimeout(resolve, 10000));
 
     const statusResponse = await fetchWithRetry(
-  `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:fetchPredictOperation`,
-  {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken.token || accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      operationName: operationName,
-    }),
-  }
-);
+      `https://generativelanguage.googleapis.com/v1beta/${operationName}`,
+      {
+        headers: {
+          "x-goog-api-key": GEMINI_API_KEY,
+        },
+      }
+    );
 
     const statusData = await statusResponse.json();
     console.log("VEO STATUS:", JSON.stringify(statusData, null, 2));
@@ -295,19 +282,9 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
           ?.generatedSamples?.[0]?.video?.uri;
 
       if (!videoUrl) {
-  const errorCode = statusData?.error?.code;
-
-  if (errorCode === 13 && attempt < 3) {
-    console.warn(
-      `VEO internal server error. Automatic retry ${attempt + 1}/3 in 10 seconds...`,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-    return createVeoLiteVideo(prompt, imageFile, attempt + 1);
-  }
-
-  console.error("Veo video URL missing:", statusData);
-  throw new Error("Veo video URL missing");
-}
+        console.error("Veo video URL missing:", statusData);
+        throw new Error("Veo video URL missing");
+      }
 
       return videoUrl;
     }
@@ -329,7 +306,6 @@ app.get("/health", (req, res) => {
 });
 
 app.post("/api/generate-video", upload.single("image"), async (req, res) => {
-  console.log("=== GENERATE VIDEO REQUEST KELDI ===");
   try {
     console.log("UPLOAD DEBUG:", {
   hasImage: !!req.file,
