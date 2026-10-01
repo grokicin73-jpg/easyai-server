@@ -44,6 +44,8 @@ const googleAuth = new google.auth.GoogleAuth({
 });
 const FREE_VIDEOS = 1;
 const VIDEO_CREDIT_COST = 6;
+const REVIEW_ACCESS_CODE =
+  (process.env.REVIEW_ACCESS_CODE || "").trim();
 
 async function getUserUsage(userId) {
   const userRef = db.collection("users").doc(userId);
@@ -160,25 +162,42 @@ async function parseJsonResponse(response) {
 
 
 async function saveVideo(remoteVideoUrl, videoId) {
-  const response = await fetch(remoteVideoUrl, {
-  headers: {
-    "x-goog-api-key": GEMINI_API_KEY,
-  },
-});
+  let videoBuffer;
 
-  if (!response.ok) {
-    throw new Error(
-      `Tayyor videoni yuklab olishda xato. HTTP ${response.status}`,
+  if (remoteVideoUrl.startsWith("data:")) {
+    const match = remoteVideoUrl.match(
+      /^data:video\/[^;,]+;base64,([\s\S]+)$/
     );
+
+    if (!match) {
+      throw new Error("Video base64 formati noto'g'ri.");
+    }
+
+    videoBuffer = Buffer.from(match[1], "base64");
+  } else {
+    const response = await fetch(remoteVideoUrl, {
+      headers: {
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Tayyor videoni yuklab olishda xato. HTTP ${response.status}`
+      );
+    }
+
+    videoBuffer = Buffer.from(await response.arrayBuffer());
   }
 
-  const videoBuffer = Buffer.from(await response.arrayBuffer());
-  const fileName = `${videoId}.mp4`;
+  if (videoBuffer.length === 0) {
+    throw new Error("Video fayli bo'sh.");
+  }
 
+  const fileName = `${videoId}.mp4`;
   const filePath = path.join(videosDirectory, fileName);
 
   await writeFile(filePath, videoBuffer);
-
   return fileName;
 }
 async function fetchWithRetry(url, options = {}, retries = 3) {
@@ -282,7 +301,10 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
 );
 
     const statusData = await statusResponse.json();
-    console.log("VEO STATUS:", JSON.stringify(statusData, null, 2));
+    console.log("VEO STATUS:", {
+  done: statusData?.done === true,
+  error: statusData?.error || null,
+});
 
     if (!statusResponse.ok) {
       console.error("Veo status error:", statusData);
@@ -329,7 +351,12 @@ console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFil
     return createVeoLiteVideo(prompt, imageFile, attempt + 1);
   }
 
-  console.error("Veo video data missing:", statusData);
+  console.error("Veo video data missing:", {
+  error: statusData?.error || null,
+  responseKeys: Object.keys(statusData?.response || {}),
+  filteredCount: statusData?.response?.raiMediaFilteredCount || 0,
+  filteredReasons: statusData?.response?.raiMediaFilteredReasons || [],
+});
   throw new Error("Veo video data missing");
 }
   }
@@ -382,16 +409,24 @@ if (!deviceId) {
   });
 }
 console.log("DEVICE ID:", deviceId);
+const reviewCode =
+  typeof req.body?.reviewCode === "string"
+    ? req.body.reviewCode.trim()
+    : "";
 
+const isReviewAccess =
+  REVIEW_ACCESS_CODE.length > 0 &&
+  reviewCode === REVIEW_ACCESS_CODE;
 const usage = await getUserUsage(deviceId);
 
 console.log("USAGE CHECK:", {
   freeVideosRemaining: usage.freeVideosRemaining,
   credits: usage.credits,
 });
-if (usage.freeVideosRemaining <= 0 && usage.credits < VIDEO_CREDIT_COST) {
+if (!isReviewAccess && usage.freeVideosRemaining <= 0 && usage.credits < VIDEO_CREDIT_COST) {
   return res.status(403).json({
     success: false,
+    code: "FREE_LIMIT_REACHED",
     error: "Bepul video limiti tugadi. Davom etish uchun kredit sotib oling.",
   });
 }
@@ -410,14 +445,16 @@ const remoteVideoUrl = await createVeoLiteVideo(prompt, req.file || null);
     const videoUrl = `${baseUrl}/videos/${fileName}`;
 const userRef = db.collection("users").doc(deviceId);
 
-if (usage.freeVideosRemaining > 0) {
-  await userRef.update({
-    freeVideosRemaining: FieldValue.increment(-1),
-  });
-} else {
-  await userRef.update({
-    credits: FieldValue.increment(-VIDEO_CREDIT_COST),
-  });
+if (!isReviewAccess) {
+  if (usage.freeVideosRemaining > 0) {
+    await userRef.update({
+      freeVideosRemaining: FieldValue.increment(-1),
+    });
+  } else {
+    await userRef.update({
+      credits: FieldValue.increment(-VIDEO_CREDIT_COST),
+    });
+  }
 }
     return res.json({
       success: true,
