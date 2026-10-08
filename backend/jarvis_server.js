@@ -13,6 +13,26 @@ if (!apiKey) {
   console.error("JARVIS_API_KEY topilmadi.");
   return;
 }
+const accessToken =
+  (process.env.JARVIS_ACCESS_TOKEN || "").trim();
+
+function isJarvisAuthorized(req) {
+  return (
+    accessToken.length >= 32 &&
+    req.headers.authorization === `Bearer ${accessToken}`
+  );
+}
+
+app.use("/api/jarvis", (req, res, next) => {
+  if (!isJarvisAuthorized(req)) {
+    return res.status(401).json({
+      success: false,
+      error: "Jarvis uchun kirish ruxsati kerak.",
+    });
+  }
+
+  next();
+});
 
 const ai = new GoogleGenAI({ apiKey });
 
@@ -332,7 +352,11 @@ const liveServer = new WebSocketServer({
   perMessageDeflate: false,
 });
 
-liveServer.on("connection", (phone) => {
+liveServer.on("connection", (phone, req) => {
+  if (!isJarvisAuthorized(req)) {
+    phone.close(1008, "Unauthorized");
+    return;
+  }
   let ready = false;
   let ended = false;
 
