@@ -35,6 +35,16 @@ app.use("/api/jarvis", (req, res, next) => {
 });
 
 const ai = new GoogleGenAI({ apiKey });
+function replyLanguage(req) {
+  const languages = {
+    en: "English",
+    ky: "Kyrgyz",
+    ru: "Russian",
+    tr: "Turkish",
+  };
+
+  return languages[req.headers["x-jarvis-language"]] || "English";
+}
 
 const model = "gemini-3.5-flash-lite";
 
@@ -103,10 +113,10 @@ app.post("/api/jarvis/chat", async (req, res) => {
         systemInstruction: `
 You are Jarvis, the AI assistant in EasyAI.
 
-Respond in the language of the user's latest message,
-including Uzbek, Kyrgyz, Tajik, English, or Russian.
-The app interface language does not control your reply language.
-If the language is unclear, ask the user which language they prefer.
+The user's selected app language is ${replyLanguage(req)}.
+Use this language for your replies by default.
+If the user explicitly requests another language, use that language.
+Support English, Kyrgyz, Russian, Turkish, Uzbek, and Tajik.
 
 Use concise, friendly answers suitable for spoken conversation.
 Help users develop video ideas, scripts, and video prompts.
@@ -437,10 +447,10 @@ liveServer.on("connection", (phone, req) => {
             text: `
 You are Jarvis, the voice assistant in EasyAI.
 Speak naturally, warmly, and briefly.
-Respond in the language the user is speaking.
-Support Uzbek, Kyrgyz, Tajik, Russian, and English.
-The app interface language does not control your language.
-If the user's language is unclear, ask one short question.
+The user's selected app language is ${replyLanguage(req)}.
+Speak in this language by default.
+If the user explicitly requests another language, use that language.
+Support English, Kyrgyz, Russian, Turkish, Uzbek, and Tajik.
 Usually answer in one to three sentences.
 Give longer answers only when requested.
 Help with video ideas, scripts, prompts, and general questions.
