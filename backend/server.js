@@ -9,6 +9,7 @@ import multer from "multer";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { google } from "googleapis";
+import { attachJarvis } from "./jarvis_server.js";
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3002;
@@ -566,5 +567,8 @@ if (!credited) {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`EasyAI server porti: ${PORT}`);
 });
+attachJarvis(app, server);
+
