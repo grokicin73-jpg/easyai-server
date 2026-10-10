@@ -74,6 +74,30 @@ const videosDirectory = path.join(__dirname, "generated-videos");
 await mkdir(videosDirectory, { recursive: true });
 
 app.use(cors());
+app.get("/instagram/webhook", (req, res) => {
+  const expectedToken =
+    (process.env.INSTAGRAM_VERIFY_TOKEN || "").trim();
+
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (!expectedToken) {
+    return res.status(503).send("Webhook token sozlanmagan.");
+  }
+
+  if (
+    mode === "subscribe" &&
+    typeof token === "string" &&
+    token === expectedToken &&
+    typeof challenge === "string" &&
+    challenge.length > 0
+  ) {
+    return res.status(200).type("text/plain").send(challenge);
+  }
+
+  return res.sendStatus(403);
+});
 app.use(express.json({ limit: "2mb" }));
 
 app.use(
