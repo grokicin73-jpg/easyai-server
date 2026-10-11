@@ -492,4 +492,487 @@ export function attachInstagram(app, db) {
       return res.json({ success: true });
     }),
   );
+  // Instagram Reels uchun videoni tayyorlash.
+  const reelJobs = db.collection("instagramPrivateReelJobs");
+
+  function openInstagramToken(account, ownerId) {
+    const saved = account.token;
+
+    if (!saved || saved.version !== 1) {
+      throw new Error("INVALID_STORED_TOKEN");
+    }
+
+    const decipher = crypto.createDecipheriv(
+      "aes-256-gcm",
+      settings().key,
+      Buffer.from(saved.iv, "base64"),
+    );
+
+    decipher.setAAD(Buffer.from(ownerId));
+    decipher.setAuthTag(Buffer.from(saved.tag, "base64"));
+
+    return Buffer.concat([
+      decipher.update(Buffer.from(saved.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+  }
+
+  app.post(
+    "/api/instagram/reels/prepare",
+    wrap(async (req, res) => {
+      res.set("Cache-Control", "no-store");
+
+      const ownerId = await owner(req, res);
+      if (!ownerId) return;
+
+      const { requestId, videoUrl, caption = "" } = req.body || {};
+
+      if (
+        !isKey(requestId) ||
+        typeof videoUrl !== "string" ||
+        typeof caption !== "string" ||
+        caption.length > 2200
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "INVALID_REEL_REQUEST",
+        });
+      }
+
+      // Hozir faqat EasyAI serveridagi MP4 videolar qabul qilinadi.
+      let url;
+
+      try {
+        url = new URL(videoUrl);
+      } catch {
+        return res.status(400).json({
+          success: false,
+          error: "INVALID_VIDEO_URL",
+        });
+      }
+
+      if (
+        url.origin !== BASE ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        !/^\/videos\/[a-zA-Z0-9_-]+\.mp4$/.test(url.pathname)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "USE_EASYAI_VIDEO_URL",
+        });
+      }
+
+      const snapshot = await connections.doc(ownerId).get();
+      const account = snapshot.data();
+
+      if (
+        !account ||
+        account.expiresAt.toMillis() <= Date.now()
+      ) {
+        return res.status(409).json({
+          success: false,
+          error: "INSTAGRAM_RECONNECT_REQUIRED",
+        });
+      }
+
+      if (
+        !Array.isArray(account.permissions) ||
+        !account.permissions.includes(
+          "instagram_business_content_publish",
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
+        });
+      }
+
+      const jobId = hash(`${ownerId}:${requestId}`);
+      const jobRef = reelJobs.doc(jobId);
+      const fingerprint = hash(
+        JSON.stringify([url.href, caption, account.instagramUserId]),
+      );
+
+      // Bir xil so'rov qayta yuborilsa yangi konteyner ochilmaydi.
+      const existing = await db.runTransaction(async (tx) => {
+        const job = await tx.get(jobRef);
+
+        if (job.exists) return job.data();
+
+        tx.create(jobRef, {
+          ownerId,
+          instagramUserId: account.instagramUserId,
+          fingerprint,
+          state: "creating",
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        return null;
+      });
+
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          return res.status(409).json({
+            success: false,
+            error: "REQUEST_ID_ALREADY_USED",
+          });
+        }
+
+        return res.json({
+          success: existing.state === "processing",
+          jobId,
+          state: existing.state,
+        });
+      }
+
+      try {
+        const accessToken = openInstagramToken(account, ownerId);
+
+        const body = new URLSearchParams({
+          media_type: "REELS",
+          video_url: url.href,
+          caption,
+          share_to_feed: "true",
+        });
+
+        const response = await fetch(
+          `https://graph.instagram.com/v25.0/${account.instagramUserId}/media`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body,
+            signal: AbortSignal.timeout(30000),
+          },
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || result.error || !result.id) {
+          throw new Error("INSTAGRAM_PREPARE_FAILED");
+        }
+
+        await jobRef.update({
+          containerId: String(result.id),
+          state: "processing",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.json({
+          success: true,
+          jobId,
+          state: "processing",
+        });
+      } catch {
+        // Noaniq natijada avtomatik takrorlash qilinmaydi.
+        await jobRef.update({
+          state: "needs_check",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.status(502).json({
+          success: false,
+          jobId,
+          error: "INSTAGRAM_PREPARE_NEEDS_CHECK",
+        });
+      }
+    }),
+  );
+  app.get(
+    "/api/instagram/reels/:jobId/status",
+    wrap(async (req, res) => {
+      res.set("Cache-Control", "no-store");
+
+      const ownerId = await owner(req, res);
+      if (!ownerId) return;
+
+      if (!isKey(req.params.jobId)) {
+        return res.status(400).json({
+          success: false,
+          error: "INVALID_JOB_ID",
+        });
+      }
+
+      const jobRef = reelJobs.doc(req.params.jobId);
+      const jobSnapshot = await jobRef.get();
+      const job = jobSnapshot.data();
+
+      if (!job || job.ownerId !== ownerId) {
+        return res.status(404).json({
+          success: false,
+          error: "REEL_NOT_FOUND",
+        });
+      }
+
+      if (!job.containerId || job.state === "published") {
+        return res.json({
+          success: true,
+          jobId: req.params.jobId,
+          state: job.state,
+          mediaId: job.mediaId || null,
+        });
+      }
+
+      const accountSnapshot = await connections.doc(ownerId).get();
+      const account = accountSnapshot.data();
+
+      if (
+        !account ||
+        account.expiresAt.toMillis() <= Date.now() ||
+        account.instagramUserId !== job.instagramUserId
+      ) {
+        return res.status(409).json({
+          success: false,
+          error: "INSTAGRAM_RECONNECT_REQUIRED",
+        });
+      }
+
+      try {
+        const accessToken = openInstagramToken(account, ownerId);
+
+        const url = new URL(
+          `https://graph.instagram.com/v25.0/${job.containerId}`,
+        );
+        url.searchParams.set("fields", "status_code");
+
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: AbortSignal.timeout(30000),
+        });
+
+        const result = await response.json();
+        const allowedStatuses = [
+          "IN_PROGRESS",
+          "FINISHED",
+          "ERROR",
+          "EXPIRED",
+          "PUBLISHED",
+        ];
+
+        if (
+          !response.ok ||
+          result.error ||
+          !allowedStatuses.includes(result.status_code)
+        ) {
+          throw new Error("INSTAGRAM_STATUS_FAILED");
+        }
+
+        await jobRef.update({
+          containerStatus: result.status_code,
+          checkedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.json({
+          success: true,
+          jobId: req.params.jobId,
+          state: job.state,
+          containerStatus: result.status_code,
+          readyToPublish:
+            job.state === "processing" &&
+            result.status_code === "FINISHED",
+        });
+      } catch {
+        return res.status(502).json({
+          success: false,
+          error: "INSTAGRAM_STATUS_FAILED",
+        });
+      }
+    }),
+  );
+  app.post(
+    "/api/instagram/reels/:jobId/publish",
+    wrap(async (req, res) => {
+      res.set("Cache-Control", "no-store");
+
+      const ownerId = await owner(req, res);
+      if (!ownerId) return;
+
+      if (
+        !isKey(req.params.jobId) ||
+        req.body?.confirm !== true
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "PUBLISH_CONFIRMATION_REQUIRED",
+        });
+      }
+
+      const jobRef = reelJobs.doc(req.params.jobId);
+      const accountRef = connections.doc(ownerId);
+
+      // Bir videoni ikki so'rov bir vaqtda joylamasin.
+      const claimed = await db.runTransaction(async (tx) => {
+        const jobSnapshot = await tx.get(jobRef);
+        const accountSnapshot = await tx.get(accountRef);
+
+        const job = jobSnapshot.data();
+        const account = accountSnapshot.data();
+
+        if (!job || job.ownerId !== ownerId) {
+          return { error: "REEL_NOT_FOUND", status: 404 };
+        }
+
+        if (job.state === "published") {
+          return { published: true, mediaId: job.mediaId };
+        }
+
+        if (
+          !account ||
+          account.expiresAt.toMillis() <= Date.now() ||
+          account.instagramUserId !== job.instagramUserId
+        ) {
+          return {
+            error: "INSTAGRAM_RECONNECT_REQUIRED",
+            status: 409,
+          };
+        }
+
+        if (
+          !Array.isArray(account.permissions) ||
+          !account.permissions.includes(
+            "instagram_business_content_publish",
+          )
+        ) {
+          return {
+            error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
+            status: 403,
+          };
+        }
+
+        if (!job.containerId || job.state !== "processing") {
+          return {
+            error: "REEL_NOT_READY_OR_ALREADY_SUBMITTED",
+            status: 409,
+          };
+        }
+
+        tx.update(jobRef, {
+          state: "publishing",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return { job, account };
+      });
+
+      if (claimed.error) {
+        return res.status(claimed.status).json({
+          success: false,
+          error: claimed.error,
+        });
+      }
+
+      if (claimed.published) {
+        return res.json({
+          success: true,
+          state: "published",
+          mediaId: claimed.mediaId,
+        });
+      }
+
+      let publishStarted = false;
+
+      try {
+        const accessToken = openInstagramToken(
+          claimed.account,
+          ownerId,
+        );
+
+        const headers = {
+          Authorization: `Bearer ${accessToken}`,
+        };
+
+        // Joylashdan oldin Instagramdan holatini tekshiramiz.
+        const statusUrl = new URL(
+          `https://graph.instagram.com/v25.0/${claimed.job.containerId}`,
+        );
+        statusUrl.searchParams.set("fields", "status_code");
+
+        const statusResponse = await fetch(statusUrl, {
+          headers,
+          signal: AbortSignal.timeout(30000),
+        });
+
+        const statusResult = await statusResponse.json();
+
+        if (!statusResponse.ok || statusResult.error) {
+          throw new Error("STATUS_FAILED");
+        }
+
+        if (statusResult.status_code !== "FINISHED") {
+          await jobRef.update({
+            state: "processing",
+            containerStatus: statusResult.status_code || "UNKNOWN",
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+
+          return res.status(409).json({
+            success: false,
+            error: "REEL_NOT_READY",
+            containerStatus: statusResult.status_code || "UNKNOWN",
+          });
+        }
+
+        const body = new URLSearchParams({
+          creation_id: claimed.job.containerId,
+        });
+
+        publishStarted = true;
+
+        const response = await fetch(
+          `https://graph.instagram.com/v25.0/${claimed.job.instagramUserId}/media_publish`,
+          {
+            method: "POST",
+            headers: {
+              ...headers,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body,
+            signal: AbortSignal.timeout(30000),
+          },
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || result.error || !result.id) {
+          throw new Error("PUBLISH_FAILED");
+        }
+
+        const mediaId = String(result.id);
+
+        await jobRef.update({
+          state: "published",
+          mediaId,
+          publishedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.json({
+          success: true,
+          jobId: req.params.jobId,
+          state: "published",
+          mediaId,
+        });
+      } catch {
+        // Joylash so'rovi yuborilgan bo'lsa avtomatik takrorlamaymiz.
+        await jobRef.update({
+          state: publishStarted ? "publish_needs_check" : "processing",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.status(502).json({
+          success: false,
+          jobId: req.params.jobId,
+          error: publishStarted
+            ? "INSTAGRAM_PUBLISH_NEEDS_CHECK"
+            : "INSTAGRAM_STATUS_FAILED",
+        });
+      }
+    }),
+  );
 }
