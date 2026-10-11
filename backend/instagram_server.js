@@ -160,7 +160,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
       fileSize: 100 * 1024 * 1024,
       files: 1,
       fields: 0,
-      parts: 1,
+      parts: 2,
     },
   }).single("video");
 
