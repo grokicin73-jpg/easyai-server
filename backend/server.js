@@ -10,6 +10,7 @@ import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { google } from "googleapis";
 import { attachJarvis } from "./jarvis_server.js";
+import { attachInstagram } from "./instagram_server.js";
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3002;
@@ -99,148 +100,7 @@ app.get("/instagram/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 app.use(express.json({ limit: "2mb" }));
-// Instagramga ulanishni sinash
-const IG_REDIRECT_URL =
-  "https://easyai-server.onrender.com/instagram/callback";
-
-const instagramLoginStates = new Map();
-
-const igCookieOptions = {
-  httpOnly: true,
-  secure: true,
-  sameSite: "lax",
-  path: "/instagram",
-};
-
-app.get("/instagram/login", (req, res) => {
-  const appId = process.env.INSTAGRAM_APP_ID?.trim();
-  const appSecret = process.env.INSTAGRAM_APP_SECRET?.trim();
-
-  res.set("Cache-Control", "no-store");
-
-  if (!appId || !appSecret) {
-    return res.status(503).send(
-      "Render'da INSTAGRAM_APP_ID yoki INSTAGRAM_APP_SECRET yo'q."
-    );
-  }
-
-  // Eskirgan urinishlarni tozalash
-  for (const [key, expiresAt] of instagramLoginStates) {
-    if (expiresAt <= Date.now()) {
-      instagramLoginStates.delete(key);
-    }
-  }
-
-  if (instagramLoginStates.size >= 1000) {
-    return res.status(429).send("Keyinroq qayta urinib ko'ring.");
-  }
-
-  const state = crypto.randomBytes(32).toString("hex");
-  instagramLoginStates.set(state, Date.now() + 10 * 60 * 1000);
-
-  res.cookie("ig_login_state", state, {
-    ...igCookieOptions,
-    maxAge: 10 * 60 * 1000,
-  });
-
-  const params = new URLSearchParams({
-    client_id: appId,
-    redirect_uri: IG_REDIRECT_URL,
-    response_type: "code",
-    scope: "instagram_business_basic",
-    state,
-  });
-
-  return res.redirect(
-    `https://www.instagram.com/oauth/authorize?${params}`
-  );
-});
-
-app.get("/instagram/callback", async (req, res) => {
-  res.set("Cache-Control", "no-store");
-  res.set("Referrer-Policy", "no-referrer");
-
-  const state =
-    typeof req.query.state === "string" ? req.query.state : "";
-
-  const cookieState = (req.headers.cookie || "")
-    .split(";")
-    .map((item) => item.trim())
-    .find((item) => item.startsWith("ig_login_state="))
-    ?.slice("ig_login_state=".length);
-
-  const expiresAt = instagramLoginStates.get(state);
-
-  if (
-    !state ||
-    state !== cookieState ||
-    !expiresAt ||
-    expiresAt <= Date.now()
-  ) {
-    return res.status(403).send(
-      "Ulanish muddati tugagan. /instagram/login orqali qayta boshlang."
-    );
-  }
-
-  instagramLoginStates.delete(state);
-  res.clearCookie("ig_login_state", igCookieOptions);
-
-  if (req.query.error) {
-    return res.status(400).send("Instagramga ulanish bekor qilindi.");
-  }
-
-  const code =
-    typeof req.query.code === "string" ? req.query.code : "";
-
-  if (!code) {
-    return res.status(400).send("Instagram tasdiqlash kodi kelmadi.");
-  }
-
-  try {
-    const form = new FormData();
-    form.set("client_id", process.env.INSTAGRAM_APP_ID.trim());
-    form.set("client_secret", process.env.INSTAGRAM_APP_SECRET.trim());
-    form.set("grant_type", "authorization_code");
-    form.set("redirect_uri", IG_REDIRECT_URL);
-    form.set("code", code);
-
-    const response = await fetch(
-      "https://api.instagram.com/oauth/access_token",
-      {
-        method: "POST",
-        body: form,
-        signal: AbortSignal.timeout(30000),
-      }
-    );
-
-    const result = await response.json();
-    const tokenData = Array.isArray(result.data)
-      ? (result.data.length === 1 ? result.data[0] : null)
-      : result;
-
-    if (!response.ok || !tokenData?.access_token || !tokenData?.user_id) {
-      console.error("INSTAGRAM LOGIN ERROR:", {
-        httpStatus: response.status,
-        code: result.error?.code || result.code || null,
-        type: result.error?.type || result.error_type || null,
-      });
-
-      return res.status(502).send(
-        "Instagram ulanishi tasdiqlanmadi. Render Logs'ni tekshiring."
-      );
-    }
-
-    // Bu bosqich faqat kirishni tekshiradi; token saqlanmaydi.
-    return res.type("text/plain").send(
-      "Instagramga kirish sinovi muvaffaqiyatli! EasyAI'ga qaytishingiz mumkin."
-    );
-  } catch {
-    console.error("INSTAGRAM CALLBACK: token olishda xato");
-    return res.status(502).send(
-      "Instagram bilan bog'lanishda xato. Qayta urinib ko'ring."
-    );
-  }
-});
+attachInstagram(app, db);
 
 app.use(
   "/videos",
