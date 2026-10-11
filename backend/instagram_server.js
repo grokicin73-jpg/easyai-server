@@ -269,7 +269,7 @@ export function attachInstagram(app, db) {
         client_id: config.appId,
         redirect_uri: REDIRECT,
         response_type: "code",
-        scope: "instagram_business_basic",
+        scope: "instagram_business_basic,instagram_business_content_publish",
         state,
       });
 
