@@ -790,8 +790,17 @@ export function attachInstagram(app, db, { videosDirectory }) {
         const result = await response.json();
 
         if (!response.ok || result.error || !result.id) {
-          throw new Error("INSTAGRAM_PREPARE_FAILED");
-        }
+  console.error("INSTAGRAM PREPARE ERROR:", {
+    httpStatus: response.status,
+    code: result.error?.code,
+    subcode: result.error?.error_subcode,
+    type: result.error?.type,
+    message: String(result.error?.message || "Missing container ID")
+      .replaceAll(accessToken, "[REDACTED]"),
+  });
+
+  throw new Error("INSTAGRAM_PREPARE_FAILED");
+}
 
         await jobRef.update({
           containerId: String(result.id),
