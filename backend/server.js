@@ -100,7 +100,7 @@ app.get("/instagram/webhook", (req, res) => {
   return res.sendStatus(403);
 });
 app.use(express.json({ limit: "2mb" }));
-attachInstagram(app, db);
+attachInstagram(app, db, { videosDirectory });
 
 app.use(
   "/videos",

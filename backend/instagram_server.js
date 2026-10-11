@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
+import multer from "multer";
+import path from "node:path";
+import { open, unlink } from "node:fs/promises";
 
 const BASE = "https://easyai-server.onrender.com";
 const REDIRECT = `${BASE}/instagram/callback`;
@@ -19,7 +22,7 @@ const nonce = () => crypto.randomBytes(32).toString("hex");
 const isKey = (value) =>
   typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 
-export function attachInstagram(app, db) {
+export function attachInstagram(app, db, { videosDirectory }) {
   const identities = db.collection("instagramPrivateIdentities");
   const tickets = db.collection("instagramPrivateTickets");
   const states = db.collection("instagramPrivateStates");
@@ -146,6 +149,139 @@ export function attachInstagram(app, db) {
 
     return data;
   }
+  const videoUpload = multer({
+    storage: multer.diskStorage({
+      destination: videosDirectory,
+      filename: (req, file, done) => {
+        done(null, `instagram-${nonce()}.mp4`);
+      },
+    }),
+    limits: {
+      fileSize: 100 * 1024 * 1024,
+      files: 1,
+      fields: 0,
+      parts: 1,
+    },
+  }).single("video");
+
+  const activeUploads = new Set();
+
+  app.post(
+    "/api/instagram/videos/upload",
+
+    async (req, res, next) => {
+      try {
+        res.set("Cache-Control", "no-store");
+
+        const ownerId = await owner(req, res);
+        if (!ownerId) return;
+
+        const snapshot = await connections.doc(ownerId).get();
+        const account = snapshot.data();
+
+        if (
+          !account ||
+          account.expiresAt.toMillis() <= Date.now()
+        ) {
+          return res.status(409).json({
+            success: false,
+            error: "INSTAGRAM_RECONNECT_REQUIRED",
+          });
+        }
+
+        if (activeUploads.has(ownerId)) {
+          return res.status(429).json({
+            success: false,
+            error: "VIDEO_UPLOAD_BUSY",
+          });
+        }
+
+        activeUploads.add(ownerId);
+
+        const release = () => activeUploads.delete(ownerId);
+        res.once("finish", release);
+        res.once("close", release);
+
+        next();
+      } catch (error) {
+        next(error);
+      }
+    },
+
+    (req, res) => {
+      videoUpload(req, res, async (uploadError) => {
+        const removeFile = async () => {
+          if (req.file?.path) {
+            await unlink(req.file.path).catch(() => {});
+          }
+        };
+
+        try {
+          if (uploadError) {
+            await removeFile();
+
+            return res.status(400).json({
+              success: false,
+              error:
+                uploadError.code === "LIMIT_FILE_SIZE"
+                  ? "VIDEO_TOO_LARGE"
+                  : "INVALID_VIDEO_UPLOAD",
+            });
+          }
+
+          if (!req.file || req.file.size < 16) {
+            await removeFile();
+
+            return res.status(400).json({
+              success: false,
+              error: "INVALID_MP4_VIDEO",
+            });
+          }
+
+          const file = await open(req.file.path, "r");
+          const header = Buffer.alloc(12);
+
+          try {
+            await file.read(header, 0, header.length, 0);
+          } finally {
+            await file.close();
+          }
+
+          const boxSize = header.readUInt32BE(0);
+          const brand = header.toString("ascii", 8, 12);
+
+          if (
+            header.toString("ascii", 4, 8) !== "ftyp" ||
+            boxSize < 16 ||
+            boxSize > req.file.size ||
+            ["qt  ", "heic", "heix", "avif", "avis"].includes(brand)
+          ) {
+            await removeFile();
+
+            return res.status(400).json({
+              success: false,
+              error: "INVALID_MP4_VIDEO",
+            });
+          }
+
+          return res.json({
+            success: true,
+            videoUrl:
+              `${BASE}/videos/${path.basename(req.file.path)}`,
+          });
+        } catch {
+          await removeFile();
+
+          if (!res.headersSent) {
+            return res.status(500).json({
+              success: false,
+              error: "VIDEO_UPLOAD_FAILED",
+            });
+          }
+        }
+      });
+    },
+  );
 
   // Ilovaning maxfiy kalitini ro'yxatdan o'tkazish
   app.post(
