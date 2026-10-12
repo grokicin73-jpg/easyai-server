@@ -133,33 +133,63 @@ function productNames(products) {
     .join("\n");
 }
 
-function productReply(product, labels, intent) {
-  const lines = [
-    labels.intro,
-    product.name,
-  ];
+function productReply(product, labels, intent, decision = null) {
+  const availability = product.available
+    ? labels.available
+    : labels.unavailable;
 
-  if (intent !== "availability") {
-    lines.push(`${labels.price}: ${priceOf(product)}`);
+  if (intent === "price") {
+    const lines = [
+      product.name,
+      `${labels.price}: ${priceOf(product)}`,
+    ];
+
+    if (!product.available) {
+      lines.push(labels.unavailable);
+    }
+
+    return lines.join("\n");
   }
 
-  lines.push(
-    product.available
-      ? labels.available
-      : labels.unavailable,
-  );
+  if (intent === "availability") {
+    return availability;
+  }
 
-  if (intent === "details" || intent === "order") {
-    lines.push(product.description.slice(0, 450));
+  if (intent === "details") {
+    // Tavsif AI so‘rovidan keyin o‘zgargan bo‘lsa,
+    // eski ma’lumotni yubormaymiz.
+    if (
+      typeof decision?.detailQuote === "string" &&
+      !!decision.detailQuote.trim() &&
+      decision.detailQuote.length <= 450 &&
+      product.description.includes(decision.detailQuote) &&
+      typeof decision.detailAnswer === "string" &&
+      !!decision.detailAnswer.trim() &&
+      decision.detailAnswer.length <= 240
+    ) {
+      return decision.detailAnswer.trim();
+    }
+
+    return labels.human;
   }
 
   if (intent === "order") {
-    lines.push(labels.order);
+    return [
+      product.name,
+      availability,
+      labels.order,
+    ].join("\n\n");
   }
 
-  return lines.filter(Boolean).join("\n\n");
+  // AI ishlamasa, mavjud katalog ma’lumotlari ko‘rsatiladi.
+  return [
+    labels.intro,
+    product.name,
+    `${labels.price}: ${priceOf(product)}`,
+    availability,
+    product.description.slice(0, 450),
+  ].filter(Boolean).join("\n\n");
 }
-
 export function buildCatalogReply(text, products) {
   const labels = TEXTS[languageOf(text)];
   const catalogue = products.filter(validProduct);
@@ -183,7 +213,7 @@ export function buildCatalogReply(text, products) {
     ].join("\n\n");
   }
 
-  return productReply(matches[0], labels, "details");
+  return productReply(matches[0], labels, "fallback");
 }
 
 export function buildPlannedReply(decision, products) {
@@ -226,7 +256,12 @@ export function buildPlannedReply(decision, products) {
     ].join("\n\n");
   }
 
-  return productReply(product, labels, decision.intent);
+  return productReply(
+  product,
+  labels,
+  decision.intent,
+  decision,
+);
 }
 
 function blockedReason(account, business, message) {
@@ -611,9 +646,14 @@ export function startInstagramMessageWorker(db, { sendReply }) {
           : [];
 
       history.push({
-        userText: message.text.slice(0, 1000),
-        replyText: message.replyText.slice(0, 1000),
-      });
+  userText: message.text.slice(0, 1000),
+  replyText: message.replyText.slice(0, 1000),
+  productId:
+    typeof message.replyDecision?.productId === "string" &&
+    /^[a-f0-9]{64}$/.test(message.replyDecision.productId)
+      ? message.replyDecision.productId
+      : "",
+});
 
       tx.set(conversationRef, {
         ownerId: message.replyOwnerId,
