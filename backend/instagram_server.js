@@ -3,6 +3,9 @@ import { FieldValue } from "firebase-admin/firestore";
 import multer from "multer";
 import path from "node:path";
 import { open, unlink } from "node:fs/promises";
+import {
+  attachInstagramBusiness,
+} from "./instagram_business_server.js";
 
 const BASE = "https://easyai-server.onrender.com";
 const REDIRECT = `${BASE}/instagram/callback`;
@@ -34,6 +37,7 @@ const numericId = (value) =>
       : null;
 
 export function attachInstagram(app, db, { videosDirectory }) {
+  attachInstagramBusiness(app, db, { owner });  
   const identities = db.collection("instagramPrivateIdentities");
   const tickets = db.collection("instagramPrivateTickets");
   const states = db.collection("instagramPrivateStates");
