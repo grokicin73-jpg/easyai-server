@@ -54,9 +54,23 @@ export function attachInstagramWebhook(app, db) {
       typeof value === "string" && /^\d+$/.test(value);
 
     for (const entry of entries) {
-      if (!Array.isArray(entry?.messaging)) continue;
+      const events = Array.isArray(entry?.messaging)
+  ? [...entry.messaging]
+  : [];
 
-      for (const event of entry.messaging) {
+if (Array.isArray(entry?.changes)) {
+  for (const change of entry.changes) {
+    if (
+      change?.field === "messages" &&
+      change?.value &&
+      typeof change.value === "object"
+    ) {
+      events.push(change.value);
+    }
+  }
+}
+
+for (const event of events) {
         const message = event?.message;
         const accountId = event?.recipient?.id;
         const senderId = event?.sender?.id;
