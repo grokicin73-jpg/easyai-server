@@ -46,6 +46,27 @@ function validateProduct(body) {
   };
 }
 
+function isConnected(account) {
+  return (
+    !!account &&
+    account.profileVerified === true &&
+    typeof account.instagramUserId === "string" &&
+    /^\d+$/.test(account.instagramUserId) &&
+    typeof account.expiresAt?.toMillis === "function" &&
+    account.expiresAt.toMillis() > Date.now()
+  );
+}
+
+function canMessage(account) {
+  return (
+    isConnected(account) &&
+    Array.isArray(account.permissions) &&
+    account.permissions.includes(
+      "instagram_business_manage_messages",
+    )
+  );
+}
+
 export function attachInstagramBusiness(app, db, { owner }) {
   const router = express.Router();
 
@@ -76,12 +97,15 @@ export function attachInstagramBusiness(app, db, { owner }) {
     }),
   );
 
-  // Faqat shu foydalanuvchining mahsulotlarini olish.
+  // Faqat shu foydalanuvchining katalogini olish.
   router.get(
     "/products",
     wrap(async (req, res) => {
-      const snapshot = await businesses
-        .doc(req.instagramOwnerId)
+      const businessRef = businesses.doc(
+        req.instagramOwnerId,
+      );
+
+      const snapshot = await businessRef
         .collection("products")
         .limit(MAX_PRODUCTS)
         .get();
@@ -106,18 +130,16 @@ export function attachInstagramBusiness(app, db, { owner }) {
         .get();
 
       const account = saved.data();
+      const business = (await businessRef.get()).data();
 
-      const connected =
-        !!account &&
-        account.profileVerified === true &&
-        account.expiresAt?.toMillis() > Date.now();
+      const connected = isConnected(account);
+      const messagingPermission = canMessage(account);
 
-      const messagingPermission =
-        connected &&
-        Array.isArray(account.permissions) &&
-        account.permissions.includes(
-          "instagram_business_manage_messages",
-        );
+      const autoReplyEnabled =
+        messagingPermission &&
+        business?.autoReplyEnabled === true &&
+        business?.autoReplyInstagramUserId ===
+          account?.instagramUserId;
 
       return res.json({
         success: true,
@@ -125,9 +147,112 @@ export function attachInstagramBusiness(app, db, { owner }) {
         username: account?.username || null,
         connected,
         messagingPermission,
+        autoReplyEnabled,
+      });
+    }),
+  );
 
-        // Direct avtomatik javoblari hali ulanmagan.
-        autoReplyEnabled: false,
+  // Avtomatik javob sozlamasini faqat egasi boshqaradi.
+  router.put(
+    "/settings",
+    wrap(async (req, res) => {
+      const body = req.body;
+
+      if (
+        !body ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        typeof body.autoReplyEnabled !== "boolean"
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "INVALID_BUSINESS_SETTINGS",
+        });
+      }
+
+      const enabled = body.autoReplyEnabled;
+
+      const businessRef = businesses.doc(
+        req.instagramOwnerId,
+      );
+
+      const connectionRef = connections.doc(
+        req.instagramOwnerId,
+      );
+
+      const result = await db.runTransaction(
+        async (transaction) => {
+          const saved = await transaction.get(
+            connectionRef,
+          );
+
+          const business = await transaction.get(
+            businessRef,
+          );
+
+          const account = saved.data();
+          const previous = business.data();
+
+          if (enabled && !isConnected(account)) {
+            return {
+              status: 409,
+              error: "INSTAGRAM_RECONNECT_REQUIRED",
+            };
+          }
+
+          if (enabled && !canMessage(account)) {
+            return {
+              status: 403,
+              error: "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED",
+            };
+          }
+
+          const alreadyEnabled =
+            enabled &&
+            previous?.autoReplyEnabled === true &&
+            previous?.autoReplyInstagramUserId ===
+              account?.instagramUserId &&
+            typeof previous?.autoReplyEnabledAt?.toMillis ===
+              "function";
+
+          transaction.set(
+            businessRef,
+            {
+              autoReplyEnabled: enabled,
+              autoReplyInstagramUserId: enabled
+                ? account.instagramUserId
+                : null,
+
+              // Kelajakdagi xabarlar shu vaqtdan
+              // boshlab javob berishga mos bo‘ladi.
+              autoReplyEnabledAt: enabled
+                ? alreadyEnabled
+                  ? previous.autoReplyEnabledAt
+                  : FieldValue.serverTimestamp()
+                : null,
+
+              settingsUpdatedAt:
+                FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+
+          return {
+            autoReplyEnabled: enabled,
+          };
+        },
+      );
+
+      if (result.error) {
+        return res.status(result.status).json({
+          success: false,
+          error: result.error,
+        });
+      }
+
+      return res.json({
+        success: true,
+        autoReplyEnabled: result.autoReplyEnabled,
       });
     }),
   );
@@ -227,7 +352,7 @@ export function attachInstagramBusiness(app, db, { owner }) {
     }),
   );
 
-  // Faqat shu foydalanuvchining mahsulotini o'chirish.
+  // Faqat shu foydalanuvchining mahsulotini o‘chirish.
   router.delete(
     "/products/:productId",
     wrap(async (req, res) => {

@@ -6,7 +6,9 @@ import { open, unlink } from "node:fs/promises";
 import {
   attachInstagramBusiness,
 } from "./instagram_business_server.js";
-
+import {
+  startInstagramMessageWorker,
+} from "./instagram_message_worker.js";
 const BASE = "https://easyai-server.onrender.com";
 const REDIRECT = `${BASE}/instagram/callback`;
 const GRAPH = "https://graph.instagram.com/v25.0";
@@ -38,6 +40,9 @@ const numericId = (value) =>
 
 export function attachInstagram(app, db, { videosDirectory }) {
   attachInstagramBusiness(app, db, { owner });  
+  startInstagramMessageWorker(db, {
+    sendReply: sendInstagramReply,
+  });
   const identities = db.collection("instagramPrivateIdentities");
   const tickets = db.collection("instagramPrivateTickets");
   const states = db.collection("instagramPrivateStates");
@@ -116,6 +121,217 @@ export function attachInstagram(app, db, { videosDirectory }) {
       decipher.update(Buffer.from(saved.ciphertext, "base64")),
       decipher.final(),
     ]).toString("utf8");
+  }
+  async function sendInstagramReply(inboxId) {
+    if (!isKey(inboxId)) {
+      throw new Error("INVALID_INBOX_ID");
+    }
+
+    const inboxRef = db
+      .collection("instagramPrivateMessageInbox")
+      .doc(inboxId);
+
+    const claimed = await db.runTransaction(async (tx) => {
+      const savedMessage = await tx.get(inboxRef);
+      const message = savedMessage.data();
+
+      // Yuborilgan yoki yuborilishi boshlangan xabar
+      // qayta yuborilmaydi.
+      if (!message || message.state !== "reply_ready") {
+        return null;
+      }
+
+      const ownerId = message.replyOwnerId;
+
+      if (
+        !isKey(ownerId) ||
+        !isId(message.instagramUserId) ||
+        !isId(message.senderId) ||
+        message.instagramUserId === message.senderId ||
+        typeof message.replyText !== "string" ||
+        !message.replyText.trim() ||
+        message.replyText.length > 1000
+      ) {
+        tx.update(inboxRef, {
+          state: "reply_failed",
+          replyError: "INVALID_REPLY_DATA",
+        });
+
+        return null;
+      }
+
+      const savedAccount = await tx.get(
+        connections.doc(ownerId),
+      );
+
+      const savedBusiness = await tx.get(
+        db.collection("instagramPrivateBusinesses").doc(ownerId),
+      );
+
+      const matchingAccounts = await tx.get(
+        connections
+          .where(
+            "instagramUserId",
+            "==",
+            message.instagramUserId,
+          )
+          .limit(2),
+      );
+
+      const account = savedAccount.data();
+      const business = savedBusiness.data();
+
+      const enabledAt =
+        typeof business?.autoReplyEnabledAt?.toMillis ===
+        "function"
+          ? business.autoReplyEnabledAt.toMillis()
+          : null;
+
+      const now = Date.now();
+
+      let reason = null;
+
+      if (
+        !account ||
+        account.profileVerified !== true ||
+        typeof account.expiresAt?.toMillis !== "function" ||
+        account.expiresAt.toMillis() <= now ||
+        account.instagramUserId !== message.instagramUserId
+      ) {
+        reason = "INSTAGRAM_RECONNECT_REQUIRED";
+      } else if (
+        !Array.isArray(account.permissions) ||
+        !account.permissions.includes(
+          "instagram_business_manage_messages",
+        )
+      ) {
+        reason = "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED";
+      } else if (
+        matchingAccounts.size !== 1 ||
+        matchingAccounts.docs[0].id !== ownerId
+      ) {
+        reason = "INSTAGRAM_ACCOUNT_OWNER_AMBIGUOUS";
+      } else if (
+        business?.autoReplyEnabled !== true ||
+        business?.autoReplyInstagramUserId !==
+          message.instagramUserId ||
+        enabledAt === null
+      ) {
+        reason = "AUTO_REPLY_DISABLED";
+      } else if (
+        !Number.isSafeInteger(message.timestamp) ||
+        message.timestamp < enabledAt ||
+        message.timestamp > now + 60 * 1000 ||
+        now - message.timestamp >= 24 * 60 * 60 * 1000
+      ) {
+        reason = "MESSAGE_OUTSIDE_REPLY_WINDOW";
+      }
+
+      if (reason) {
+        tx.update(inboxRef, {
+          state: "reply_skipped",
+          replyError: reason,
+          replyUpdatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return null;
+      }
+
+      tx.update(inboxRef, {
+        state: "sending",
+        replyAttemptAt: FieldValue.serverTimestamp(),
+      });
+
+      return {
+        ownerId,
+        account,
+        senderId: message.senderId,
+        replyText: message.replyText.trim(),
+      };
+    });
+
+    if (!claimed) return null;
+
+    let accessToken;
+    let requestStarted = false;
+
+    try {
+      accessToken = openInstagramToken(
+        claimed.account,
+        claimed.ownerId,
+      );
+
+      requestStarted = true;
+
+      const result = await meta(
+        `${GRAPH}/${claimed.account.instagramUserId}/messages`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            recipient: {
+              id: claimed.senderId,
+            },
+            message: {
+              text: claimed.replyText,
+            },
+          }),
+        },
+      );
+
+      if (
+        typeof result.message_id !== "string" ||
+        !result.message_id ||
+        result.recipient_id !== claimed.senderId
+      ) {
+        throw new Error("INVALID_SEND_RESPONSE");
+      }
+
+      await inboxRef.update({
+        state: "replied",
+        replyMessageId: result.message_id,
+        repliedAt: FieldValue.serverTimestamp(),
+      });
+
+      console.info("Instagram reply: sent");
+
+      return {
+        messageId: result.message_id,
+      };
+    } catch (error) {
+      logError(
+        "INSTAGRAM REPLY ERROR:",
+        error,
+        [accessToken],
+      );
+
+      // Natijasi noaniq bo‘lgan yuborishni
+      // avtomatik qayta urinishga qo‘ymaymiz.
+      const clearlyRejected =
+        Number.isInteger(error.httpStatus) &&
+        error.httpStatus >= 400 &&
+        error.httpStatus < 500;
+
+      await inboxRef.update({
+        state:
+          requestStarted && !clearlyRejected
+            ? "reply_needs_check"
+            : "reply_failed",
+        replyError: "INSTAGRAM_REPLY_FAILED",
+        replyHttpStatus: error.httpStatus || null,
+        replyMetaCode: error.metaCode || null,
+        replyUpdatedAt: FieldValue.serverTimestamp(),
+      }).catch(() => {
+        console.error(
+          "Instagram reply: result could not be saved",
+        );
+      });
+
+      return null;
+    }
   }
 
   function credential(req) {
