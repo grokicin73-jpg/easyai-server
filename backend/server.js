@@ -11,6 +11,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { google } from "googleapis";
 import { attachJarvis } from "./jarvis_server.js";
 import { attachInstagram } from "./instagram_server.js";
+import { attachInstagramWebhook } from "./instagram_webhook.js";
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3002;
@@ -99,8 +100,16 @@ app.get("/instagram/webhook", (req, res) => {
 
   return res.sendStatus(403);
 });
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, res, buffer) => {
+    if (req.path === "/instagram/webhook") {
+      req.instagramRawBody = Buffer.from(buffer);
+    }
+  },
+}));
 attachInstagram(app, db, { videosDirectory });
+attachInstagramWebhook(app, db);
 
 app.use(
   "/videos",
