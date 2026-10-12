@@ -487,6 +487,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
         client_id: config.appId,
         redirect_uri: REDIRECT,
         response_type: "code",
+        force_reauth: "true",
         scope: [
   "instagram_business_basic",
   "instagram_business_content_publish",
