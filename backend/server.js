@@ -411,6 +411,245 @@ app.get("/health", (req, res) => {
     status: "healthy",
   });
 });
+app.get("/privacy", (req, res) => {
+  res.type("html").send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EasyAI Pro — Privacy Policy</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      color: #eee;
+      font: 16px/1.7 Arial, sans-serif;
+    }
+    main {
+      max-width: 850px;
+      margin: auto;
+      padding: 28px 20px;
+    }
+    a { color: #91caff; }
+    section {
+      margin: 32px 0;
+      padding-bottom: 24px;
+      border-bottom: 1px solid #444;
+    }
+    h1, h2, h3 { line-height: 1.3; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>EasyAI / EasyAI Pro</h1>
+  <nav>
+    <a href="#en">English</a> ·
+    <a href="#ky">Кыргызча</a> ·
+    <a href="#ru">Русский</a> ·
+    <a href="#tr">Türkçe</a>
+  </nav>
+
+  <section id="en" lang="en">
+    <h2>Privacy Policy</h2>
+    <p>Updated: 12 October 2026.
+    Contact: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
+
+    <h3>Data and purposes</h3>
+    <p>EasyAI processes prompts, selected images, and microphone audio
+    when you use the corresponding AI features. These inputs are sent
+    to Google AI services to generate responses or videos.
+    Device or installation identifiers, usage counters, credit balances,
+    and purchase verification data are used to provide free allowances,
+    manage credits, verify purchases, and prevent misuse.</p>
+
+    <p>If you connect Instagram, we process account identifiers,
+    profile information, granted permissions, encrypted access tokens,
+    connection dates, publishing records, and product catalogue data.
+    When messaging is enabled, we receive message text, sender and
+    recipient identifiers, message identifiers, and available timestamps.
+    This supports the Instagram features you use.
+    Instagram login takes place through Instagram; do not send your
+    Instagram password to EasyAI support.</p>
+
+    <h3>Service providers and access</h3>
+    <p>Google AI, Firebase, Render, Meta/Instagram, and Google Play
+    process relevant data to provide AI, storage, hosting, Instagram,
+    and payment services. Their own privacy policies also apply.
+    Generated videos can be accessible to anyone who has their direct
+    video URL. Avoid submitting confidential content.</p>
+
+    <h3>Storage and deletion</h3>
+    <p>Backend connections use HTTPS, and stored Instagram access tokens
+    are encrypted. Database records remain stored until removed;
+    no general automatic deletion period is currently configured.
+    Generated files may become unavailable when server storage is reset.
+    Disconnecting Instagram should not be treated as deletion of all
+    previously stored data.</p>
+
+    <p>To request access to or deletion of your EasyAI data, email
+    <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>
+    with the subject “EasyAI data deletion” and identify the connected
+    Instagram account or relevant app installation.
+    Requests are handled manually and ownership must be verified.
+    Do not include passwords or access tokens.
+    We will explain which records can be removed and any records that
+    must be retained before completing the request.
+    Data already published on Instagram or held by service providers
+    is also subject to their own controls and retention practices.</p>
+  </section>
+
+  <section id="ky" lang="ky">
+    <h2>Купуялык саясаты</h2>
+    <p>Жаңыртылган күнү: 2026-жылдын 12-октябры.
+    Байланыш: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
+
+    <h3>Маалыматтар жана максаттар</h3>
+    <p>Тиешелүү AI функцияларын колдонгондо EasyAI тексттик
+    суроо-талаптарды, тандалган сүрөттөрдү жана микрофон үнүн иштетет.
+    Алар жооп же видео түзүү үчүн Google AI кызматтарына жөнөтүлөт.
+    Түзмөк же орнотуу идентификаторлору, колдонуу эсептегичтери,
+    кредит балансы жана сатып алууну текшерүү маалыматтары акысыз
+    мүмкүнчүлүктөрдү, кредиттерди жана төлөмдөрдү башкаруу,
+    ошондой эле кыянаттык менен пайдаланууну алдын алуу үчүн колдонулат.</p>
+
+    <p>Instagram туташтырылса, аккаунт идентификаторлору, профиль,
+    берилген уруксаттар, шифрленген кирүү токендери, туташуу даталары,
+    жарыялоо жазуулары жана товар каталогу иштетилет.
+    Билдирүүлөр иштетилгенде билдирүү тексти, жөнөтүүчү жана алуучу
+    идентификаторлору, билдирүү идентификатору жана жеткиликтүү
+    убакыт белгилери алынат. Бул колдонулган Instagram функцияларын
+    камсыз кылат. Кирүү Instagram аркылуу жүргүзүлөт;
+    колдоо кызматына Instagram сырсөзүңүздү жөнөтпөңүз.</p>
+
+    <h3>Кызматтар жана жеткиликтүүлүк</h3>
+    <p>Google AI, Firebase, Render, Meta/Instagram жана Google Play
+    тиешелүү маалыматтарды AI, сактоо, хостинг, Instagram жана
+    төлөм кызматтары үчүн иштетет. Алардын купуялык саясаттары да
+    колдонулат. Түзүлгөн видеонун түз шилтемесин билген адам аны
+    көрө алышы мүмкүн. Жашыруун маалыматтарды жөнөтүүдөн сак болуңуз.</p>
+
+    <h3>Сактоо жана өчүрүү</h3>
+    <p>Сервер байланыштары HTTPS колдонот, сакталган Instagram токендери
+    шифрленет. База жазуулары өчүрүлгөнгө чейин сакталат;
+    жалпы автоматтык өчүрүү мөөнөтү азырынча коюлган эмес.
+    Сервер сактагычы жаңырганда видео файлдар жеткиликсиз болушу мүмкүн.
+    Instagram байланышын үзүү бардык мурдагы маалыматтарды өчүрбөйт.</p>
+
+    <p>Маалыматтарга жетүү же аларды өчүрүү үчүн
+    <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>
+    дарегине “EasyAI data deletion” темасы менен жазыңыз.
+    Туташкан Instagram аккаунтун же колдонмонун тиешелүү орнотуусун
+    көрсөтүңүз. Сурам кол менен каралат жана ээлик текшерилет.
+    Сырсөздөрдү же токендерди жөнөтпөңүз.
+    Өчүрүлө турган жана сакталууга тийиш болгон жазуулар тууралуу
+    сурам аткарылганга чейин түшүндүрөбүз.
+    Instagramда жарыяланган же башка кызматтар сактаган маалыматтарга
+    ошол кызматтардын башкаруу жана сактоо эрежелери да колдонулат.</p>
+  </section>
+
+  <section id="ru" lang="ru">
+    <h2>Политика конфиденциальности</h2>
+    <p>Обновлено: 12 октября 2026 года.
+    Контакт: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
+
+    <h3>Данные и цели</h3>
+    <p>При использовании соответствующих функций EasyAI обрабатывает
+    запросы, выбранные изображения и звук микрофона.
+    Эти данные передаются сервисам Google AI для создания ответов
+    или видео. Идентификаторы устройства или установки, счётчики
+    использования, баланс кредитов и данные проверки покупок
+    используются для предоставления бесплатного лимита, управления
+    кредитами, проверки платежей и предотвращения злоупотреблений.</p>
+
+    <p>При подключении Instagram обрабатываются идентификаторы аккаунта,
+    профиль, предоставленные разрешения, зашифрованные токены доступа,
+    даты подключения, записи публикаций и каталог товаров.
+    При включении сообщений принимаются текст, идентификаторы
+    отправителя, получателя и сообщения, а также доступные временные
+    отметки. Это обеспечивает используемые функции Instagram.
+    Авторизация проходит через Instagram;
+    не отправляйте пароль Instagram службе поддержки EasyAI.</p>
+
+    <h3>Поставщики услуг и доступ</h3>
+    <p>Google AI, Firebase, Render, Meta/Instagram и Google Play
+    обрабатывают соответствующие данные для работы AI, хранения,
+    хостинга, Instagram и платежей. Также действуют их собственные
+    политики конфиденциальности. Созданное видео может быть доступно
+    любому, кто знает его прямую ссылку.
+    Не отправляйте конфиденциальные материалы.</p>
+
+    <h3>Хранение и удаление</h3>
+    <p>Соединения с сервером используют HTTPS, а сохранённые токены
+    Instagram зашифрованы. Записи базы хранятся до удаления;
+    общий срок автоматического удаления пока не настроен.
+    Видео могут стать недоступными при сбросе серверного хранилища.
+    Отключение Instagram не означает удаление всех ранее
+    сохранённых данных.</p>
+
+    <p>Для доступа к своим данным или запроса удаления напишите на
+    <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>
+    с темой «EasyAI data deletion». Укажите подключённый аккаунт
+    Instagram или соответствующую установку приложения.
+    Запросы рассматриваются вручную с проверкой принадлежности.
+    Не присылайте пароли и токены.
+    До выполнения запроса мы объясним, какие записи можно удалить
+    и какие необходимо сохранить.
+    На опубликованные в Instagram данные и данные у поставщиков
+    услуг также распространяются их правила управления и хранения.</p>
+  </section>
+
+  <section id="tr" lang="tr">
+    <h2>Gizlilik Politikası</h2>
+    <p>Güncelleme: 12 Ekim 2026.
+    İletişim: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
+
+    <h3>Veriler ve amaçlar</h3>
+    <p>İlgili AI özelliklerini kullandığınızda EasyAI istemleri,
+    seçilen görselleri ve mikrofon sesini işler.
+    Bu girdiler yanıt veya video oluşturmak için Google AI
+    hizmetlerine gönderilir. Cihaz veya kurulum kimlikleri,
+    kullanım sayaçları, kredi bakiyesi ve satın alma doğrulama
+    verileri ücretsiz kullanım hakkını ve kredileri yönetmek,
+    ödemeleri doğrulamak ve kötüye kullanımı önlemek için kullanılır.</p>
+
+    <p>Instagram bağlandığında hesap kimlikleri, profil bilgileri,
+    verilen izinler, şifrelenmiş erişim belirteçleri, bağlantı tarihleri,
+    yayın kayıtları ve ürün kataloğu işlenir.
+    Mesajlaşma etkinse mesaj metni, gönderen ve alıcı kimlikleri,
+    mesaj kimliği ve mevcut zaman bilgileri alınır.
+    Bunlar kullandığınız Instagram özelliklerini sağlar.
+    Giriş Instagram üzerinden yapılır;
+    Instagram şifrenizi EasyAI desteğine göndermeyin.</p>
+
+    <h3>Hizmet sağlayıcıları ve erişim</h3>
+    <p>Google AI, Firebase, Render, Meta/Instagram ve Google Play,
+    AI, depolama, barındırma, Instagram ve ödeme hizmetleri için
+    ilgili verileri işler. Kendi gizlilik politikaları da geçerlidir.
+    Oluşturulan videolar doğrudan video bağlantısını bilen kişilere
+    açık olabilir. Gizli içerik göndermekten kaçının.</p>
+
+    <h3>Saklama ve silme</h3>
+    <p>Sunucu bağlantıları HTTPS kullanır ve saklanan Instagram erişim
+    belirteçleri şifrelenir. Veritabanı kayıtları silinene kadar
+    saklanır; genel bir otomatik silme süresi henüz yapılandırılmamıştır.
+    Sunucu depolaması sıfırlandığında videolar erişilemez olabilir.
+    Instagram bağlantısını kesmek, önceki tüm verileri silmez.</p>
+
+    <p>Verilerinize erişim veya silme talebi için
+    <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>
+    adresine “EasyAI data deletion” konusuyla yazın.
+    Bağlı Instagram hesabını veya ilgili uygulama kurulumunu belirtin.
+    Talepler elle incelenir ve sahiplik doğrulanır.
+    Şifre veya erişim belirteci göndermeyin.
+    Talebi tamamlamadan önce silinebilecek kayıtları ve saklanması
+    gereken kayıtları açıklayacağız.
+    Instagram'da yayınlanan veya hizmet sağlayıcılarında tutulan
+    veriler onların yönetim ve saklama kurallarına da tabidir.</p>
+  </section>
+</main>
+</body>
+</html>`);
+});
 
 app.post("/api/generate-video", upload.single("image"), async (req, res) => {
   console.log("=== GENERATE VIDEO REQUEST KELDI ===");
