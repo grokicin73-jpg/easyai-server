@@ -3,6 +3,10 @@ import express from "express";
 import { GoogleGenAI } from "@google/genai";
 import multer from "multer";
 import WebSocket, { WebSocketServer } from "ws";
+import {
+  videoDraftTool,
+  createVideoDraftHandler,
+} from "./jarvis_video_tools.js";
 
 export function attachJarvis(app, server) {
 
@@ -387,6 +391,7 @@ liveServer.on("connection", (phone, req) => {
       phone.send(JSON.stringify(message));
     }
   }
+  const handleVideoDraft = createVideoDraftHandler(sendPhone);
 
   function logError(message) {
     console.error(
@@ -454,14 +459,38 @@ Support English, Kyrgyz, Russian, Turkish, Uzbek, and Tajik.
 Usually answer in one to three sentences.
 Give longer answers only when requested.
 Help with video ideas, scripts, prompts, and general questions.
-You have no connected tools for purchases, phone calls,
-video generation, or changing settings.
-Never claim that you performed an action.
+You have one tool: prepare_video_draft.
+When the user asks to create a video, prepare a concrete idea
+and call prepare_video_draft once.
+
+If the user asks you to choose an idea, choose one yourself.
+Ask one question only if essential details are missing.
+
+The title must be in the user's requested language.
+The video prompt must be at most 2000 characters.
+Write visual instructions in English for one coherent 8-second scene.
+Preserve the exact requested language of spoken dialogue.
+The caption must include suitable hashtags and be at most 2200 characters.
+Do not claim that an idea is currently trending without evidence.
+
+This tool sends a draft to the app. It does not generate a video.
+The user reviews the draft and taps Generate video in the app.
+The app uses the existing EasyAI video generation and credit system.
+Instagram publication is confirmed separately on the Reels page.
+
+Never claim a video was generated or published.
+Never invent an account name, video URL, or completed action.
+You have no tools for purchases, phone calls, or changing settings.
 `,
           }],
         },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
+        tools: [
+  {
+    functionDeclarations: [videoDraftTool],
+  },
+],
+inputAudioTranscription: {},
+outputAudioTranscription: {},
         realtimeInputConfig: {
           automaticActivityDetection: {
             disabled: false,
@@ -492,6 +521,21 @@ Never claim that you performed an action.
         sendPhone({ type: "ready" });
         console.log("Jarvis live: connected");
       }
+      if (message.toolCall) {
+  const functionResponses = handleVideoDraft(
+    message.toolCall.functionCalls,
+  );
+
+  if (google.readyState === WebSocket.OPEN) {
+    google.send(
+      JSON.stringify({
+        toolResponse: { functionResponses },
+      }),
+    );
+  }
+
+  return;
+}
 
       const content = message.serverContent;
       if (!content) {
