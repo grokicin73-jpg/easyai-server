@@ -470,6 +470,22 @@ app.get("/privacy", (req, res) => {
     This supports the Instagram features you use.
     Instagram login takes place through Instagram; do not send your
     Instagram password to EasyAI support.</p>
+    <h3>AI content reports</h3>
+    <p>When you submit an in-app content report, EasyAI receives
+    your selected reason, optional comments, app language,
+    and the relevant content available on that screen. This may
+    include AI response text, conversation transcripts, prompts,
+    captions, model names, and a generated video URL.
+    This reporting feature does not attach microphone audio.</p>
+
+    <p>Reports are stored in Firebase Firestore with a report
+    identifier, submission time, and review status. They are used
+    to investigate reported content and improve content safety.
+    Reports remain stored until manually deleted; no automatic
+    deletion period is currently configured.
+    To request deletion, contact grokicin73@gmail.com and provide
+    the submission time and enough information to identify your
+    report. Do not include passwords or access tokens.</p>
 
     <h3>Service providers and access</h3>
     <p>Google AI, Firebase, Render, Meta/Instagram, and Google Play
@@ -520,6 +536,25 @@ app.get("/privacy", (req, res) => {
     убакыт белгилери алынат. Бул колдонулган Instagram функцияларын
     камсыз кылат. Кирүү Instagram аркылуу жүргүзүлөт;
     колдоо кызматына Instagram сырсөзүңүздү жөнөтпөңүз.</p>
+    <h3>AI контентине даттануулар</h3>
+    <p>Колдонмонун ичинен даттануу жөнөткөндө EasyAI тандалган
+    себепти, кошумча комментарийди, колдонмонун тилин жана
+    ошол экрандагы тиешелүү контентти алат.
+    Аларга AI жообунун тексти, сүйлөшүүнүн тексттик жазмасы,
+    промпттор, сүрөттөмөлөр, моделдин аты жана түзүлгөн
+    видеонун шилтемеси кириши мүмкүн.
+    Бул даттануу функциясы микрофондун аудиосун тиркебейт.</p>
+
+    <p>Даттануулар Firebase Firestore базасында идентификатору,
+    жөнөтүлгөн убактысы жана текшерүү абалы менен сакталат.
+    Алар билдирилген контентти текшерүү жана контенттин
+    коопсуздугун жакшыртуу үчүн колдонулат.
+    Даттануулар кол менен өчүрүлгөнгө чейин сакталат;
+    автоматтык өчүрүү мөөнөтү азырынча коюлган эмес.
+    Өчүрүүнү сурануу үчүн grokicin73@gmail.com дарегине
+    жөнөтүлгөн убакытты жана даттанууну табууга жетиштүү
+    маалыматты жазыңыз. Сырсөздөрдү же кирүү токендерин
+    жөнөтпөңүз.</p>
 
     <h3>Кызматтар жана жеткиликтүүлүк</h3>
     <p>Google AI, Firebase, Render, Meta/Instagram жана Google Play
@@ -569,6 +604,23 @@ app.get("/privacy", (req, res) => {
     отметки. Это обеспечивает используемые функции Instagram.
     Авторизация проходит через Instagram;
     не отправляйте пароль Instagram службе поддержки EasyAI.</p>
+    <h3>Жалобы на контент ИИ</h3>
+    <p>При отправке жалобы внутри приложения EasyAI получает
+    выбранную причину, необязательный комментарий, язык приложения
+    и соответствующий контент, доступный на этом экране.
+    Это может включать текст ответа ИИ, текстовую расшифровку
+    разговора, промпты, описания, названия моделей и ссылку
+    на созданное видео. Эта функция подачи жалоб
+    не прикрепляет аудио с микрофона.</p>
+
+    <p>Жалобы сохраняются в Firebase Firestore с идентификатором,
+    временем отправки и статусом проверки. Они используются
+    для рассмотрения указанного контента и улучшения его
+    безопасности. Жалобы хранятся до ручного удаления;
+    срок автоматического удаления пока не настроен.
+    Для запроса удаления напишите на grokicin73@gmail.com,
+    указав время отправки и сведения, достаточные для поиска
+    вашей жалобы. Не отправляйте пароли и токены доступа.</p>
 
     <h3>Поставщики услуг и доступ</h3>
     <p>Google AI, Firebase, Render, Meta/Instagram и Google Play
@@ -620,6 +672,24 @@ app.get("/privacy", (req, res) => {
     Bunlar kullandığınız Instagram özelliklerini sağlar.
     Giriş Instagram üzerinden yapılır;
     Instagram şifrenizi EasyAI desteğine göndermeyin.</p>
+    <h3>AI içerik bildirimleri</h3>
+    <p>Uygulama içinden bir içerik bildirimi gönderdiğinizde
+    EasyAI seçtiğiniz nedeni, isteğe bağlı yorumunuzu,
+    uygulama dilini ve o ekrandaki ilgili içeriği alır.
+    Bunlar AI yanıt metnini, konuşmanın yazılı dökümünü,
+    istemleri, açıklamaları, model adlarını ve oluşturulan
+    videonun bağlantısını içerebilir.
+    Bu bildirim özelliği mikrofon sesini eklemez.</p>
+
+    <p>Bildirimler Firebase Firestore içinde bir kimlik,
+    gönderim zamanı ve inceleme durumu ile saklanır.
+    Bildirilen içeriği incelemek ve içerik güvenliğini
+    iyileştirmek için kullanılır. Bildirimler elle silinene
+    kadar saklanır; otomatik silme süresi henüz
+    yapılandırılmamıştır. Silme talebi için
+    grokicin73@gmail.com adresine gönderim zamanını ve
+    bildiriminizi bulmaya yeterli bilgileri yazın.
+    Şifre veya erişim belirteci göndermeyin.</p>
 
     <h3>Hizmet sağlayıcıları ve erişim</h3>
     <p>Google AI, Firebase, Render, Meta/Instagram ve Google Play,
