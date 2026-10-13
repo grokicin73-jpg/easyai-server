@@ -650,6 +650,92 @@ app.get("/privacy", (req, res) => {
 </body>
 </html>`);
 });
+// AI yaratgan kontent haqidagi shikoyatlarni qabul qilish
+app.post("/api/content-reports", async (req, res) => {
+  try {
+    const body = req.body;
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_CONTENT_REPORT",
+      });
+    }
+
+    const allowedTypes = new Set(["video", "chat", "voice"]);
+    const allowedReasons = new Set([
+      "sexual",
+      "violence",
+      "hate",
+      "child_safety",
+      "misleading",
+      "other",
+    ]);
+    const allowedLanguages = new Set([
+      "English",
+      "Кыргызча",
+      "Русский",
+      "Türkçe",
+    ]);
+
+    if (
+      !allowedTypes.has(body.contentType) ||
+      !allowedReasons.has(body.reason) ||
+      !allowedLanguages.has(body.language)
+    ) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_CONTENT_REPORT",
+      });
+    }
+
+    const limits = {
+      details: 2000,
+      content: 20000,
+      prompt: 20000,
+      model: 100,
+      videoUrl: 4096,
+    };
+
+    const fields = {};
+
+    for (const [name, limit] of Object.entries(limits)) {
+      const value = body[name] ?? "";
+
+      if (typeof value !== "string" || value.length > limit) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONTENT_REPORT",
+        });
+      }
+
+      fields[name] = value.trim();
+    }
+
+    const reportRef = db.collection("contentReports").doc();
+
+    await reportRef.set({
+      contentType: body.contentType,
+      reason: body.reason,
+      language: body.language,
+      ...fields,
+      status: "new",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    return res.status(201).json({
+      success: true,
+      reportId: reportRef.id,
+    });
+  } catch (error) {
+    console.error("CONTENT REPORT SAVE FAILED:", error);
+
+    return res.status(500).json({
+      success: false,
+      code: "CONTENT_REPORT_FAILED",
+    });
+  }
+});
 
 app.post("/api/generate-video", upload.single("image"), async (req, res) => {
   console.log("=== GENERATE VIDEO REQUEST KELDI ===");
