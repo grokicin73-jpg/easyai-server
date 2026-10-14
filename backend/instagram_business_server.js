@@ -5,7 +5,12 @@ import {
 } from "firebase-admin/firestore";
 
 const CURRENCIES = [
-  "KGS", "USD", "UZS", "RUB", "TRY", "EUR",
+  "KGS",
+  "USD",
+  "UZS",
+  "RUB",
+  "TRY",
+  "EUR",
 ];
 
 const MAX_PRODUCTS = 1000;
@@ -145,7 +150,11 @@ function parseListOptions(query) {
   };
 }
 
-export function attachInstagramBusiness(app, db, { owner }) {
+export function attachInstagramBusiness(
+  app,
+  db,
+  { owner },
+) {
   const router = express.Router();
 
   const businesses = db.collection(
@@ -166,15 +175,16 @@ export function attachInstagramBusiness(app, db, { owner }) {
       res.set("Cache-Control", "no-store");
 
       const ownerId = await owner(req, res);
+
       if (!ownerId) return;
 
       req.instagramOwnerId = ownerId;
+
       next();
     }),
   );
 
-  // Katalog sahifalari va nom/tavsif bo‘yicha qidiruv.
-  // Har bir so‘rov faqat shu egasining katalogini o‘qiydi.
+  // Read only the authenticated owner's catalogue.
   router.get(
     "/products",
     wrap(async (req, res) => {
@@ -200,8 +210,6 @@ export function attachInstagramBusiness(app, db, { owner }) {
       let matchedTotal = null;
 
       if (options.search) {
-        // 1000 tagacha katalogda qidiruv serverda bajariladi.
-        // Telefon va AI ga butun katalog yuborilmaydi.
         const snapshot = await productsRef
           .orderBy(FieldPath.documentId())
           .limit(MAX_PRODUCTS + 1)
@@ -246,6 +254,7 @@ export function attachInstagramBusiness(app, db, { owner }) {
 
         products = page.map(publicProduct);
         hasMore = remaining.length > page.length;
+
         nextCursor =
           hasMore && page.length
             ? page[page.length - 1].id
@@ -259,24 +268,34 @@ export function attachInstagramBusiness(app, db, { owner }) {
           pageQuery = pageQuery.startAfter(options.cursor);
         }
 
-        const [snapshot, countSnapshot] = await Promise.all([
+        const [
+          snapshot,
+          countSnapshot,
+        ] = await Promise.all([
           pageQuery.limit(options.limit + 1).get(),
           productsRef.count().get(),
         ]);
 
         total = countSnapshot.data().count;
 
-        const page = snapshot.docs.slice(0, options.limit);
+        const page = snapshot.docs.slice(
+          0,
+          options.limit,
+        );
 
         products = page.map(publicProduct);
         hasMore = snapshot.size > options.limit;
+
         nextCursor =
           hasMore && page.length
             ? page[page.length - 1].id
             : null;
       }
 
-      const [savedAccount, savedBusiness] = await Promise.all([
+      const [
+        savedAccount,
+        savedBusiness,
+      ] = await Promise.all([
         connections.doc(req.instagramOwnerId).get(),
         businessRef.get(),
       ]);
@@ -311,100 +330,98 @@ export function attachInstagramBusiness(app, db, { owner }) {
     }),
   );
 
-  // Avtomatik javob sozlamasini faqat egasi boshqaradi.
-  router.put(
-    "/settings",
-    wrap(async (req, res) => {
-      const body = req.body;
+  // Used by both the settings route and authorized Jarvis commands.
+  const saveSettings = wrap(async (req, res) => {
+    const body = req.body;
 
-      if (
-        !body ||
-        typeof body !== "object" ||
-        Array.isArray(body) ||
-        typeof body.autoReplyEnabled !== "boolean"
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "INVALID_BUSINESS_SETTINGS",
-        });
-      }
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      typeof body.autoReplyEnabled !== "boolean"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_BUSINESS_SETTINGS",
+      });
+    }
 
-      const enabled = body.autoReplyEnabled;
+    const enabled = body.autoReplyEnabled;
 
-      const businessRef = businesses.doc(
-        req.instagramOwnerId,
-      );
+    const businessRef = businesses.doc(
+      req.instagramOwnerId,
+    );
 
-      const connectionRef = connections.doc(
-        req.instagramOwnerId,
-      );
+    const connectionRef = connections.doc(
+      req.instagramOwnerId,
+    );
 
-      const result = await db.runTransaction(async (tx) => {
-        const saved = await tx.get(connectionRef);
-        const savedBusiness = await tx.get(businessRef);
+    const result = await db.runTransaction(async (tx) => {
+      const saved = await tx.get(connectionRef);
+      const savedBusiness = await tx.get(businessRef);
 
-        const account = saved.data();
-        const previous = savedBusiness.data();
+      const account = saved.data();
+      const previous = savedBusiness.data();
 
-        if (enabled && !isConnected(account)) {
-          return {
-            status: 409,
-            error: "INSTAGRAM_RECONNECT_REQUIRED",
-          };
-        }
-
-        if (enabled && !canMessage(account)) {
-          return {
-            status: 403,
-            error: "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED",
-          };
-        }
-
-        const alreadyEnabled =
-          enabled &&
-          previous?.autoReplyEnabled === true &&
-          previous?.autoReplyInstagramUserId ===
-            account?.instagramUserId &&
-          typeof previous?.autoReplyEnabledAt?.toMillis ===
-            "function";
-
-        tx.set(
-          businessRef,
-          {
-            autoReplyEnabled: enabled,
-            autoReplyInstagramUserId: enabled
-              ? account.instagramUserId
-              : null,
-            autoReplyEnabledAt: enabled
-              ? alreadyEnabled
-                ? previous.autoReplyEnabledAt
-                : FieldValue.serverTimestamp()
-              : null,
-            settingsUpdatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-
+      if (enabled && !isConnected(account)) {
         return {
-          autoReplyEnabled: enabled,
+          status: 409,
+          error: "INSTAGRAM_RECONNECT_REQUIRED",
         };
-      });
-
-      if (result.error) {
-        return res.status(result.status).json({
-          success: false,
-          error: result.error,
-        });
       }
 
-      return res.json({
-        success: true,
-        autoReplyEnabled: result.autoReplyEnabled,
-      });
-    }),
-  );
+      if (enabled && !canMessage(account)) {
+        return {
+          status: 403,
+          error: "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED",
+        };
+      }
 
-  // Mahsulot yaratish yoki tahrirlash.
+      const alreadyEnabled =
+        enabled &&
+        previous?.autoReplyEnabled === true &&
+        previous?.autoReplyInstagramUserId ===
+          account?.instagramUserId &&
+        typeof previous?.autoReplyEnabledAt?.toMillis ===
+          "function";
+
+      tx.set(
+        businessRef,
+        {
+          autoReplyEnabled: enabled,
+          autoReplyInstagramUserId: enabled
+            ? account.instagramUserId
+            : null,
+          autoReplyEnabledAt: enabled
+            ? alreadyEnabled
+              ? previous.autoReplyEnabledAt
+              : FieldValue.serverTimestamp()
+            : null,
+          settingsUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      return {
+        autoReplyEnabled: enabled,
+      };
+    });
+
+    if (result.error) {
+      return res.status(result.status).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    return res.json({
+      success: true,
+      autoReplyEnabled: result.autoReplyEnabled,
+    });
+  });
+
+  router.put("/settings", saveSettings);
+
   router.put(
     "/products/:productId",
     wrap(async (req, res) => {
@@ -448,7 +465,6 @@ export function attachInstagramBusiness(app, db, { owner }) {
         ) {
           count = savedCount;
         } else {
-          // Hisoblagich yo‘q bo‘lsa mavjud katalogdan tiklanadi.
           const snapshot = await tx.get(
             productsRef.limit(MAX_PRODUCTS + 1),
           );
@@ -456,7 +472,10 @@ export function attachInstagramBusiness(app, db, { owner }) {
           count = snapshot.size;
         }
 
-        if (!existing.exists && count >= MAX_PRODUCTS) {
+        if (
+          !existing.exists &&
+          count >= MAX_PRODUCTS
+        ) {
           return false;
         }
 
@@ -477,7 +496,8 @@ export function attachInstagramBusiness(app, db, { owner }) {
         tx.set(
           businessRef,
           {
-            productCount: count + (existing.exists ? 0 : 1),
+            productCount:
+              count + (existing.exists ? 0 : 1),
             catalogRevision: FieldValue.increment(1),
             catalogUpdatedAt: FieldValue.serverTimestamp(),
           },
@@ -505,7 +525,6 @@ export function attachInstagramBusiness(app, db, { owner }) {
     }),
   );
 
-  // Mahsulotni faqat katalog egasi o‘chiradi.
   router.delete(
     "/products/:productId",
     wrap(async (req, res) => {
@@ -585,4 +604,61 @@ export function attachInstagramBusiness(app, db, { owner }) {
   });
 
   app.use("/api/instagram/business", router);
+
+  return {
+    async setAutoReply(ownerId, enabled) {
+      let status = 200;
+      let result;
+      let raised;
+
+      const res = {
+        set() {
+          return this;
+        },
+
+        status(code) {
+          status = code;
+          return this;
+        },
+
+        json(data) {
+          result = data;
+          return this;
+        },
+      };
+
+      await saveSettings(
+        {
+          instagramOwnerId: ownerId,
+          body: {
+            autoReplyEnabled: enabled,
+          },
+        },
+        res,
+        (error) => {
+          raised = error;
+        },
+      );
+
+      if (raised) {
+        throw raised;
+      }
+
+      if (
+        status >= 400 ||
+        result?.success !== true
+      ) {
+        throw Object.assign(
+          new Error(
+            result?.error || "BUSINESS_SETTINGS_FAILED",
+          ),
+          {
+            code: result?.error,
+          },
+        );
+      }
+
+      return result;
+    },
+  };
 }

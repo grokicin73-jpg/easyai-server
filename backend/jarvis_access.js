@@ -5,12 +5,14 @@ import {
 } from "firebase-admin/firestore";
 
 const digest = (value) =>
-  crypto.createHash("sha256").update(value).digest("hex");
+  crypto
+    .createHash("sha256")
+    .update(value)
+    .digest("hex");
 
 const hex64 = /^[a-f0-9]{64}$/;
 const devicePattern = /^[a-f0-9]{16}$/;
 
-// Mikrofondan kelgan WAV yozuvini tekshirish.
 export function isJarvisVoiceRecording(audio) {
   if (
     !Buffer.isBuffer(audio) ||
@@ -25,10 +27,7 @@ export function isJarvisVoiceRecording(audio) {
   let validFormat = false;
   let dataBytes = 0;
 
-  for (
-    let offset = 12;
-    offset + 8 <= audio.length;
-  ) {
+  for (let offset = 12; offset + 8 <= audio.length;) {
     const name = audio.toString(
       "ascii",
       offset,
@@ -99,6 +98,7 @@ function fail(status, code) {
   const error = new Error(code);
   error.status = status;
   error.code = code;
+
   return error;
 }
 
@@ -106,13 +106,12 @@ export function createJarvisAccess(app) {
   const db = getFirestore();
 
   const settings = {
-    // Ilovada ko‘rsatilgan narxlar bilan bir xil bo‘lsin.
+    // Keep these values in sync with the app's displayed terms.
     freeChats: 3,
     freeLiveMinutes: 1,
     chatCost: 1,
     liveCost: 1,
 
-    // Barcha foydalanuvchilar uchun umumiy kunlik chegaralar.
     dailyChats: integerSetting(
       "JARVIS_GLOBAL_DAILY_CHATS",
       100,
@@ -144,10 +143,7 @@ export function createJarvisAccess(app) {
     ),
   };
 
-  if (
-    settings.chatCost < 1 ||
-    settings.liveCost < 1
-  ) {
+  if (settings.chatCost < 1 || settings.liveCost < 1) {
     throw new Error(
       "Jarvis paid credit costs must be at least 1",
     );
@@ -179,13 +175,12 @@ export function createJarvisAccess(app) {
   }
 
   const dailyRef = () =>
-    db.collection("jarvisDailyUsage").doc(
-      new Date().toISOString().slice(0, 10),
-    );
+    db
+      .collection("jarvisDailyUsage")
+      .doc(new Date().toISOString().slice(0, 10));
 
   const number = (data, key) =>
-    Number.isSafeInteger(data?.[key]) &&
-    data[key] >= 0
+    Number.isSafeInteger(data?.[key]) && data[key] >= 0
       ? data[key]
       : 0;
 
@@ -209,7 +204,7 @@ export function createJarvisAccess(app) {
     );
   }
 
-  // Bu endpoint umumiy Jarvis avtorizatsiyasidan oldin qo‘shiladi.
+  // Register this route before the authorization middleware.
   app.post("/api/jarvis/session", async (req, res) => {
     try {
       const {
@@ -221,9 +216,7 @@ export function createJarvisAccess(app) {
       const daily = dailyRef();
 
       await db.runTransaction(async (transaction) => {
-        const userSnapshot =
-          await transaction.get(userRef);
-
+        const userSnapshot = await transaction.get(userRef);
         const user = userSnapshot.data() || {};
 
         if (
@@ -240,8 +233,7 @@ export function createJarvisAccess(app) {
           return;
         }
 
-        const dailySnapshot =
-          await transaction.get(daily);
+        const dailySnapshot = await transaction.get(daily);
 
         incrementDaily(
           transaction,
@@ -264,8 +256,7 @@ export function createJarvisAccess(app) {
           {
             ...initial,
             jarvisCredentialHash: credentialHash,
-            jarvisFreeChatsRemaining:
-              settings.freeChats,
+            jarvisFreeChatsRemaining: settings.freeChats,
             jarvisFreeLiveMinutesRemaining:
               settings.freeLiveMinutes,
             jarvisRegisteredAt:
@@ -275,7 +266,7 @@ export function createJarvisAccess(app) {
         );
       });
 
-      return res.json({
+      res.json({
         success: true,
         chatCreditCost: settings.chatCost,
         liveMinuteCreditCost: settings.liveCost,
@@ -302,6 +293,7 @@ export function createJarvisAccess(app) {
     }
 
     req.jarvisIdentity = identity;
+
     return identity;
   }
 
@@ -333,7 +325,6 @@ export function createJarvisAccess(app) {
     }
   }
 
-  // Matnli javob uchun bepul imkoniyat yoki kreditni rezervlash.
   async function reserveChat(req) {
     const requestId = req.body?.requestId;
 
@@ -346,9 +337,9 @@ export function createJarvisAccess(app) {
 
     const identity = req.jarvisIdentity;
 
-    const ref = db.collection("jarvisRequests").doc(
-      `${identity.credentialHash}-${requestId}`,
-    );
+    const ref = db
+      .collection("jarvisRequests")
+      .doc(`${identity.credentialHash}-${requestId}`);
 
     const userRef = db
       .collection("users")
@@ -370,10 +361,7 @@ export function createJarvisAccess(app) {
         const saved = existing.data();
 
         if (saved.fingerprint !== fingerprint) {
-          throw fail(
-            409,
-            "JARVIS_REQUEST_CONFLICT",
-          );
+          throw fail(409, "JARVIS_REQUEST_CONFLICT");
         }
 
         if (saved.status === "completed") {
@@ -382,18 +370,11 @@ export function createJarvisAccess(app) {
           };
         }
 
-        throw fail(
-          409,
-          "JARVIS_REQUEST_ALREADY_USED",
-        );
+        throw fail(409, "JARVIS_REQUEST_ALREADY_USED");
       }
 
-      const userSnapshot =
-        await transaction.get(userRef);
-
-      const dailySnapshot =
-        await transaction.get(daily);
-
+      const userSnapshot = await transaction.get(userRef);
+      const dailySnapshot = await transaction.get(daily);
       const user = userSnapshot.data();
 
       if (
@@ -445,7 +426,11 @@ export function createJarvisAccess(app) {
     });
   }
 
-  async function completeChat(reservation, reply) {
+  async function completeChat(
+    reservation,
+    reply,
+    extra = {},
+  ) {
     const speechToken = crypto
       .randomBytes(32)
       .toString("hex");
@@ -454,6 +439,7 @@ export function createJarvisAccess(app) {
       success: true,
       reply,
       speechToken,
+      ...extra,
     };
 
     await reservation.ref.update({
@@ -466,17 +452,19 @@ export function createJarvisAccess(app) {
     return result;
   }
 
-  // Xato bilan tugagan so‘rovning rezervini bir marta qaytarish.
   async function refundChat(reservation) {
     if (!reservation?.ref) return;
 
     await db.runTransaction(async (transaction) => {
-      const snapshot =
-        await transaction.get(reservation.ref);
+      const snapshot = await transaction.get(
+        reservation.ref,
+      );
 
       const saved = snapshot.data();
 
-      if (saved?.status !== "pending") return;
+      if (saved?.status !== "pending") {
+        return;
+      }
 
       transaction.update(
         db.collection("users").doc(saved.deviceId),
@@ -494,7 +482,6 @@ export function createJarvisAccess(app) {
     });
   }
 
-  // Ovozli xabarni matnga aylantirishga ruxsat.
   async function admitTranscription(req) {
     const identity = req.jarvisIdentity;
     const daily = dailyRef();
@@ -504,12 +491,8 @@ export function createJarvisAccess(app) {
       .doc(identity.deviceId);
 
     await db.runTransaction(async (transaction) => {
-      const userSnapshot =
-        await transaction.get(userRef);
-
-      const dailySnapshot =
-        await transaction.get(daily);
-
+      const userSnapshot = await transaction.get(userRef);
+      const dailySnapshot = await transaction.get(daily);
       const user = userSnapshot.data();
 
       if (
@@ -552,7 +535,6 @@ export function createJarvisAccess(app) {
     });
   }
 
-  // Faqat shu foydalanuvchining tayyor javobini bir marta o‘qish.
   async function admitSpeech(req) {
     const requestId = req.body?.requestId;
     const speechToken = req.body?.speechToken;
@@ -568,17 +550,15 @@ export function createJarvisAccess(app) {
 
     const identity = req.jarvisIdentity;
 
-    const ref = db.collection("jarvisRequests").doc(
-      `${identity.credentialHash}-${requestId}`,
-    );
+    const ref = db
+      .collection("jarvisRequests")
+      .doc(`${identity.credentialHash}-${requestId}`);
 
     const daily = dailyRef();
 
     await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
-      const dailySnapshot =
-        await transaction.get(daily);
-
+      const dailySnapshot = await transaction.get(daily);
       const saved = snapshot.data();
 
       if (
@@ -587,10 +567,7 @@ export function createJarvisAccess(app) {
         saved.result?.reply !== req.body.text ||
         saved.speechAttempted
       ) {
-        throw fail(
-          403,
-          "JARVIS_SPEECH_NOT_AVAILABLE",
-        );
+        throw fail(403, "JARVIS_SPEECH_NOT_AVAILABLE");
       }
 
       incrementDaily(
@@ -607,7 +584,6 @@ export function createJarvisAccess(app) {
     });
   }
 
-  // Jonli suhbatning navbatdagi daqiqasini rezervlash.
   async function reserveLiveMinute(
     req,
     sessionId,
@@ -619,9 +595,9 @@ export function createJarvisAccess(app) {
       .collection("users")
       .doc(identity.deviceId);
 
-    const ref = db.collection("jarvisLiveCharges").doc(
-      `${sessionId}-${minute}`,
-    );
+    const ref = db
+      .collection("jarvisLiveCharges")
+      .doc(`${sessionId}-${minute}`);
 
     const daily = dailyRef();
 
@@ -629,18 +605,11 @@ export function createJarvisAccess(app) {
       const existing = await transaction.get(ref);
 
       if (existing.exists) {
-        throw fail(
-          409,
-          "JARVIS_REQUEST_ALREADY_USED",
-        );
+        throw fail(409, "JARVIS_REQUEST_ALREADY_USED");
       }
 
-      const userSnapshot =
-        await transaction.get(userRef);
-
-      const dailySnapshot =
-        await transaction.get(daily);
-
+      const userSnapshot = await transaction.get(userRef);
+      const dailySnapshot = await transaction.get(daily);
       const user = userSnapshot.data();
 
       if (
@@ -661,27 +630,18 @@ export function createJarvisAccess(app) {
         leaseMs > Date.now() &&
         user.jarvisLiveSessionId !== sessionId
       ) {
-        throw fail(
-          409,
-          "JARVIS_LIVE_ALREADY_ACTIVE",
-        );
+        throw fail(409, "JARVIS_LIVE_ALREADY_ACTIVE");
       }
 
       if (
         minute > 1 &&
         user.jarvisLiveSessionId !== sessionId
       ) {
-        throw fail(
-          409,
-          "JARVIS_LIVE_ALREADY_ACTIVE",
-        );
+        throw fail(409, "JARVIS_LIVE_ALREADY_ACTIVE");
       }
 
       const free =
-        number(
-          user,
-          "jarvisFreeLiveMinutesRemaining",
-        ) > 0;
+        number(user, "jarvisFreeLiveMinutesRemaining") > 0;
 
       if (
         !free &&
@@ -725,22 +685,54 @@ export function createJarvisAccess(app) {
   }
 
   async function markLiveMinute(reservation) {
-    await reservation.ref.update({
-      status: "started",
+    await db.runTransaction(async (transaction) => {
+      const saved = (
+        await transaction.get(reservation.ref)
+      ).data();
+
+      if (saved?.status !== "reserved") {
+        throw fail(409, "JARVIS_REQUEST_ALREADY_USED");
+      }
+
+      const userRef = db
+        .collection("users")
+        .doc(saved.deviceId);
+
+      const user = (
+        await transaction.get(userRef)
+      ).data();
+
+      const sessionId = reservation.ref.id.split("-")[0];
+
+      if (user?.jarvisLiveSessionId !== sessionId) {
+        throw fail(409, "JARVIS_LIVE_ALREADY_ACTIVE");
+      }
+
+      transaction.update(reservation.ref, {
+        status: "started",
+      });
+
+      transaction.update(userRef, {
+        jarvisLiveLeaseUntil: new Date(
+          Date.now() + 90000,
+        ),
+      });
     });
   }
 
-  // Boshlanmagan jonli suhbat daqiqasini qaytarish.
   async function refundLiveMinute(reservation) {
     if (!reservation?.ref) return;
 
     await db.runTransaction(async (transaction) => {
-      const snapshot =
-        await transaction.get(reservation.ref);
+      const snapshot = await transaction.get(
+        reservation.ref,
+      );
 
       const saved = snapshot.data();
 
-      if (saved?.status !== "reserved") return;
+      if (saved?.status !== "reserved") {
+        return;
+      }
 
       transaction.update(
         db.collection("users").doc(saved.deviceId),
@@ -766,8 +758,7 @@ export function createJarvisAccess(app) {
       const snapshot = await transaction.get(ref);
 
       if (
-        snapshot.data()?.jarvisLiveSessionId !==
-        sessionId
+        snapshot.data()?.jarvisLiveSessionId !== sessionId
       ) {
         return;
       }

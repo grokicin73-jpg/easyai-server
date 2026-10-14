@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api_service.dart';
+import 'credits_page.dart';
 
 const _currencies = ['KGS', 'USD', 'UZS', 'RUB', 'TRY', 'EUR'];
 
@@ -11,6 +12,7 @@ const _productTexts = <String, List<String>>{
     'Мои товары',
     'Ürünlerim',
   ],
+  'credits': ['Credits', 'Кредиттер', 'Кредиты', 'Krediler'],
   'add': [
     'Add product',
     'Товар кошуу',
@@ -107,11 +109,29 @@ const _productTexts = <String, List<String>>{
     'Введите цену от 0 до 99999999.99, не более двух знаков после запятой.',
     '0 ile 99999999.99 arasında, en fazla iki ondalık basamaklı fiyat girin.',
   ],
+  'search': [
+    'Search products',
+    'Товар издөө',
+    'Поиск товаров',
+    'Ürün ara',
+  ],
+  'more': [
+    'Load more',
+    'Дагы жүктөө',
+    'Загрузить ещё',
+    'Daha fazla yükle',
+  ],
+  'replyHelp': [
+    'Replies use your catalogue. AI assistance is limited; when unavailable, catalogue replies continue. The assistant cannot accept payments or confirm orders. You can also tell Jarvis to enable or disable Instagram Direct replies.',
+    'Жооптор каталогуңузду колдонот. AI жардамында чектөө бар; жеткиликсиз болсо каталог жооптору уланат. Жардамчы төлөм кабыл албайт же буйрутманы ырастабайт. Jarvisке Instagram Direct жоопторун күйгүзүү же өчүрүү буйругун да бере аласыз.',
+    'Ответы используют ваш каталог. Помощь ИИ ограничена; при её недоступности продолжаются ответы по каталогу. Помощник не принимает платежи и не подтверждает заказы. Ответы Direct можно включить или выключить командой Jarvis.',
+    'Yanıtlar kataloğunuzu kullanır. AI yardımı sınırlıdır; kullanılamadığında katalog yanıtları sürer. Asistan ödeme alamaz veya sipariş onaylayamaz. Instagram Direct yanıtlarını Jarvis komutuyla da açıp kapatabilirsiniz.',
+  ],
   'limit': [
-    'You can save up to 50 products.',
-    'Эң көп 50 товар сактай аласыз.',
-    'Можно сохранить до 50 товаров.',
-    'En fazla 50 ürün kaydedebilirsiniz.',
+    'You can save up to 1000 products.',
+    'Эң көп 1000 товар сактай аласыз.',
+    'Можно сохранить до 1000 товаров.',
+    'En fazla 1000 ürün kaydedebilirsiniz.',
   ],
   'catalogHelp': [
     'Save accurate product names, prices and availability. Catalogue replies use these details.',
@@ -275,8 +295,15 @@ class InstagramProductsPage extends StatefulWidget {
       _InstagramProductsPageState();
 }
 
-class _InstagramProductsPageState extends State<InstagramProductsPage> {
+class _InstagramProductsPageState
+    extends State<InstagramProductsPage> {
   final _api = ApiService();
+  final _search = TextEditingController();
+
+  String? _nextCursor;
+  bool _hasMore = false;
+  int _total = 0;
+  int _maxProducts = 1000;
 
   List<_Product> _products = [];
   String? _username;
@@ -296,7 +323,7 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool append = false}) async {
     if (_busy) return;
 
     setState(() {
@@ -306,7 +333,12 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     });
 
     try {
-      final result = await _api.getInstagramProducts();
+      final result = await _api.getInstagramProducts(
+        search: _search.text.trim(),
+        cursor: append ? _nextCursor : null,
+        limit: 50,
+      );
+
       final raw = result['products'];
       final connected = result['connected'];
       final messagingPermission = result['messagingPermission'];
@@ -317,7 +349,8 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
           connected is! bool ||
           messagingPermission is! bool ||
           autoReplyEnabled is! bool ||
-          (autoReplyEnabled && (!connected || !messagingPermission))) {
+          (autoReplyEnabled &&
+              (!connected || !messagingPermission))) {
         throw const FormatException('INVALID_CATALOG_RESPONSE');
       }
 
@@ -332,7 +365,26 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
       if (!mounted) return;
 
       setState(() {
-        _products = products;
+        _products = append
+            ? [
+                ..._products,
+                ...products.where(
+                  (item) => !_products.any(
+                    (old) => old.id == item.id,
+                  ),
+                ),
+              ]
+            : products;
+
+        _hasMore = result['hasMore'] == true;
+        _nextCursor = result['nextCursor'] as String?;
+        _total = result['total'] is int
+            ? result['total'] as int
+            : _products.length;
+        _maxProducts = result['maxProducts'] is int
+            ? result['maxProducts'] as int
+            : 1000;
+
         _connected = connected;
         _messagingPermission = messagingPermission;
         _autoReplyEnabled = autoReplyEnabled;
@@ -370,11 +422,13 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, false),
               child: Text(_t('cancel')),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, true),
               child: Text(_t('enable')),
             ),
           ],
@@ -390,7 +444,9 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     });
 
     try {
-      final saved = await _api.setInstagramAutoReplyEnabled(enabled);
+      final saved = await _api.setInstagramAutoReplyEnabled(
+        enabled,
+      );
 
       if (!mounted) return;
 
@@ -415,7 +471,8 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
   Future<void> _edit([_Product? product]) async {
     if (_busy) return;
 
-    final id = product?.id ?? _api.createInstagramReelRequestId();
+    final id = product?.id ??
+        _api.createInstagramReelRequestId();
 
     await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
@@ -428,6 +485,7 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     );
 
     if (!mounted) return;
+
     await _load();
   }
 
@@ -441,11 +499,13 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
         content: Text(product.name),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () =>
+                Navigator.pop(dialogContext, false),
             child: Text(_t('cancel')),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () =>
+                Navigator.pop(dialogContext, true),
             child: Text(_t('delete')),
           ),
         ],
@@ -472,9 +532,16 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     }
 
     if (!mounted) return;
+
     if (_error == null) {
       await _load();
     }
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
   }
 
   String get _replySubtitle {
@@ -482,7 +549,9 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     if (!_connected) return _t('connectRequired');
     if (!_messagingPermission) return _t('permissionRequired');
 
-    return _t(_autoReplyEnabled ? 'autoReplyOn' : 'autoReplyOff');
+    return _t(
+      _autoReplyEnabled ? 'autoReplyOn' : 'autoReplyOff',
+    );
   }
 
   @override
@@ -490,7 +559,8 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
     final canChangeReplies = !_busy &&
         _error == null &&
         _settingsKnown &&
-        (_autoReplyEnabled || (_connected && _messagingPermission));
+        (_autoReplyEnabled ||
+            (_connected && _messagingPermission));
 
     return Theme(
       data: ThemeData.dark(useMaterial3: true),
@@ -500,6 +570,22 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
           title: Text(_t('title')),
           backgroundColor: Colors.black,
           actions: [
+            IconButton(
+              tooltip: _t('credits'),
+              onPressed: _busy
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => CreditsPage(
+                            language: widget.language,
+                          ),
+                        ),
+                      ),
+              icon: const Icon(
+                Icons.account_balance_wallet_outlined,
+              ),
+            ),
             IconButton(
               tooltip: _t('refresh'),
               onPressed: _busy ? null : _load,
@@ -512,10 +598,26 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
           children: [
             Text(_t('catalogHelp')),
             const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              maxLength: 120,
+              enabled: !_busy,
+              onSubmitted: (_) => _load(),
+              decoration: InputDecoration(
+                labelText: _t('search'),
+                suffixIcon: IconButton(
+                  onPressed: _busy ? null : () => _load(),
+                  icon: const Icon(Icons.search),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             if (_username != null) ...[
               Text(
                 '${_t('account')}: @$_username',
-                style: const TextStyle(color: Colors.greenAccent),
+                style: const TextStyle(
+                  color: Colors.greenAccent,
+                ),
               ),
               const SizedBox(height: 12),
             ],
@@ -526,23 +628,27 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
                 subtitle: Text(_replySubtitle),
                 value: _autoReplyEnabled,
                 isThreeLine: true,
-                onChanged: canChangeReplies ? _setAutoReply : null,
+                onChanged: canChangeReplies
+                    ? _setAutoReply
+                    : null,
               ),
             ),
+            Text(_t('replyHelp')),
             const SizedBox(height: 16),
             Text(
-              '${_products.length}/50',
+              '${_products.length} / $_total · $_maxProducts',
               style: const TextStyle(color: Colors.white60),
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
-              onPressed: _busy || _error != null || _products.length >= 50
-                  ? null
-                  : () => _edit(),
+              onPressed:
+                  _busy || _error != null || _total >= _maxProducts
+                      ? null
+                      : () => _edit(),
               icon: const Icon(Icons.add),
               label: Text(_t('add')),
             ),
-            if (_products.length >= 50) ...[
+            if (_total >= _maxProducts) ...[
               const SizedBox(height: 8),
               Text(_t('limit')),
             ],
@@ -554,7 +660,9 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
               const SizedBox(height: 16),
               Text(
                 _error!,
-                style: const TextStyle(color: Colors.orangeAccent),
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                ),
               ),
               TextButton(
                 onPressed: _busy ? null : _load,
@@ -562,7 +670,16 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
               ),
             ],
             const SizedBox(height: 16),
-            if (!_busy && _error == null && _products.isEmpty)
+            if (_hasMore)
+              OutlinedButton(
+                onPressed: _busy
+                    ? null
+                    : () => _load(append: true),
+                child: Text(_t('more')),
+              ),
+            if (!_busy &&
+                _error == null &&
+                _products.isEmpty)
               Text(_t('empty')),
             for (final product in _products)
               Card(
@@ -570,7 +687,8 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
                     children: [
                       Text(
                         product.name,
@@ -592,7 +710,11 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _t(product.available ? 'available' : 'unavailable'),
+                        _t(
+                          product.available
+                              ? 'available'
+                              : 'unavailable',
+                        ),
                         style: TextStyle(
                           color: product.available
                               ? Colors.greenAccent
@@ -604,13 +726,21 @@ class _InstagramProductsPageState extends State<InstagramProductsPage> {
                         spacing: 8,
                         children: [
                           TextButton.icon(
-                            onPressed: _busy ? null : () => _edit(product),
-                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: _busy
+                                ? null
+                                : () => _edit(product),
+                            icon: const Icon(
+                              Icons.edit_outlined,
+                            ),
                             label: Text(_t('edit')),
                           ),
                           TextButton.icon(
-                            onPressed: _busy ? null : () => _delete(product),
-                            icon: const Icon(Icons.delete_outline),
+                            onPressed: _busy
+                                ? null
+                                : () => _delete(product),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                            ),
                             label: Text(_t('delete')),
                           ),
                         ],
@@ -638,10 +768,12 @@ class _ProductEditorPage extends StatefulWidget {
   });
 
   @override
-  State<_ProductEditorPage> createState() => _ProductEditorPageState();
+  State<_ProductEditorPage> createState() =>
+      _ProductEditorPageState();
 }
 
-class _ProductEditorPageState extends State<_ProductEditorPage> {
+class _ProductEditorPageState
+    extends State<_ProductEditorPage> {
   final _api = ApiService();
   final _form = GlobalKey<FormState>();
 
@@ -723,7 +855,9 @@ class _ProductEditorPageState extends State<_ProductEditorPage> {
         child: Scaffold(
           backgroundColor: Colors.black,
           appBar: AppBar(
-            title: Text(_t(widget.product == null ? 'add' : 'edit')),
+            title: Text(
+              _t(widget.product == null ? 'add' : 'edit'),
+            ),
             backgroundColor: Colors.black,
             automaticallyImplyLeading: !_busy,
           ),
@@ -767,7 +901,8 @@ class _ProductEditorPageState extends State<_ProductEditorPage> {
                 TextFormField(
                   controller: _price,
                   enabled: !_busy,
-                  keyboardType: const TextInputType.numberWithOptions(
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
                   decoration: InputDecoration(
@@ -776,9 +911,10 @@ class _ProductEditorPageState extends State<_ProductEditorPage> {
                     helperMaxLines: 3,
                     border: const OutlineInputBorder(),
                   ),
-                  validator: (value) => _parsePrice(value ?? '') == null
-                      ? _t('invalidPrice')
-                      : null,
+                  validator: (value) =>
+                      _parsePrice(value ?? '') == null
+                          ? _t('invalidPrice')
+                          : null,
                 ),
                 const SizedBox(height: 20),
                 InputDecorator(
@@ -801,7 +937,9 @@ class _ProductEditorPageState extends State<_ProductEditorPage> {
                           ? null
                           : (value) {
                               if (value != null) {
-                                setState(() => _currency = value);
+                                setState(
+                                  () => _currency = value,
+                                );
                               }
                             },
                     ),
@@ -814,13 +952,16 @@ class _ProductEditorPageState extends State<_ProductEditorPage> {
                   value: _available,
                   onChanged: _busy
                       ? null
-                      : (value) => setState(() => _available = value),
+                      : (value) =>
+                          setState(() => _available = value),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(
                     _error!,
-                    style: const TextStyle(color: Colors.orangeAccent),
+                    style: const TextStyle(
+                      color: Colors.orangeAccent,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 20),

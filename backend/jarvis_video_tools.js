@@ -7,17 +7,26 @@ export const videoDraftTool = {
   parameters: {
     type: "OBJECT",
     properties: {
-      title: { type: "STRING" },
-      prompt: { type: "STRING" },
-      caption: { type: "STRING" },
+      title: {
+        type: "STRING",
+      },
+      prompt: {
+        type: "STRING",
+      },
+      caption: {
+        type: "STRING",
+      },
     },
-    required: ["title", "prompt", "caption"],
+    required: [
+      "title",
+      "prompt",
+      "caption",
+    ],
   },
 };
 
 export function createVideoDraftHandler(sendPhone) {
   const handled = new Map();
-  let sent = false;
 
   return (calls) => {
     if (!Array.isArray(calls) || calls.length > 16) {
@@ -46,7 +55,9 @@ export function createVideoDraftHandler(sendPhone) {
       let response;
 
       if (call.name !== videoDraftTool.name) {
-        response = { error: "UNKNOWN_TOOL" };
+        response = {
+          error: "UNKNOWN_TOOL",
+        };
       } else if (
         !args ||
         typeof args.title !== "string" ||
@@ -58,11 +69,8 @@ export function createVideoDraftHandler(sendPhone) {
         typeof args.caption !== "string" ||
         args.caption.length > 2200
       ) {
-        response = { error: "INVALID_DRAFT" };
-      } else if (sent) {
         response = {
-          error: "ONE_DRAFT_PER_SESSION",
-          instruction: "Review the existing draft in the app.",
+          error: "INVALID_DRAFT",
         };
       } else {
         sendPhone({
@@ -72,8 +80,6 @@ export function createVideoDraftHandler(sendPhone) {
           prompt: args.prompt.trim(),
           caption: args.caption.trim(),
         });
-
-        sent = true;
 
         response = {
           status: "draft_sent_to_app",
@@ -92,6 +98,7 @@ export function createVideoDraftHandler(sendPhone) {
       };
 
       handled.set(call.id, result);
+
       return result;
     });
   };

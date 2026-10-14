@@ -75,19 +75,27 @@ function languageOf(text) {
   if (
     /[ңөү]/i.test(value) ||
     /салам|канча|баасы|барбы|товарлар/i.test(value)
-  ) return "ky";
+  ) {
+    return "ky";
+  }
 
   if (
     /[ıİğşç]/i.test(text) ||
     /\b(merhaba|fiyat|stok|sipariş)\b/i.test(value)
-  ) return "tr";
+  ) {
+    return "tr";
+  }
 
-  if (/[а-яё]/i.test(value)) return "ru";
+  if (/[а-яё]/i.test(value)) {
+    return "ru";
+  }
 
   if (
     /\b(salom|qancha|narx|narxi|mahsulot|bormi|buyurtma)\b/i
       .test(value)
-  ) return "uz";
+  ) {
+    return "uz";
+  }
 
   return "en";
 }
@@ -117,6 +125,40 @@ function validProduct(product) {
   );
 }
 
+export function selectSalesProducts(text, products) {
+  const query = normalize(text);
+  const words = query
+    .split(" ")
+    .filter((value) => value.length >= 3);
+
+  return products
+    .map((product, index) => {
+      const name = normalize(product.name);
+      const detail = normalize(product.description || "");
+
+      const score =
+        (name.length >= 2 && query.includes(name) ? 100 : 0) +
+        words.reduce(
+          (sum, word) =>
+            sum +
+            (name.includes(word)
+              ? 10
+              : detail.includes(word)
+                ? 1
+                : 0),
+          0,
+        );
+
+      return { product, index, score };
+    })
+    .sort(
+      (a, b) =>
+        b.score - a.score || a.index - b.index,
+    )
+    .slice(0, 50)
+    .map((item) => item.product);
+}
+
 function priceOf(product) {
   const whole = Math.floor(product.priceMinor / 100);
   const fraction = String(
@@ -133,7 +175,12 @@ function productNames(products) {
     .join("\n");
 }
 
-function productReply(product, labels, intent, decision = null) {
+function productReply(
+  product,
+  labels,
+  intent,
+  decision = null,
+) {
   const availability = product.available
     ? labels.available
     : labels.unavailable;
@@ -156,8 +203,7 @@ function productReply(product, labels, intent, decision = null) {
   }
 
   if (intent === "details") {
-    // Tavsif AI so‘rovidan keyin o‘zgargan bo‘lsa,
-    // eski ma’lumotni yubormaymiz.
+    // Verify that the quoted detail still exists in the catalogue.
     if (
       typeof decision?.detailQuote === "string" &&
       !!decision.detailQuote.trim() &&
@@ -181,7 +227,6 @@ function productReply(product, labels, intent, decision = null) {
     ].join("\n\n");
   }
 
-  // AI ishlamasa, mavjud katalog ma’lumotlari ko‘rsatiladi.
   return [
     labels.intro,
     product.name,
@@ -190,6 +235,7 @@ function productReply(product, labels, intent, decision = null) {
     product.description.slice(0, 450),
   ].filter(Boolean).join("\n\n");
 }
+
 export function buildCatalogReply(text, products) {
   const labels = TEXTS[languageOf(text)];
   const catalogue = products.filter(validProduct);
@@ -213,7 +259,11 @@ export function buildCatalogReply(text, products) {
     ].join("\n\n");
   }
 
-  return productReply(matches[0], labels, "fallback");
+  return productReply(
+    matches[0],
+    labels,
+    "fallback",
+  );
 }
 
 export function buildPlannedReply(decision, products) {
@@ -257,11 +307,11 @@ export function buildPlannedReply(decision, products) {
   }
 
   return productReply(
-  product,
-  labels,
-  decision.intent,
-  decision,
-);
+    product,
+    labels,
+    decision.intent,
+    decision,
+  );
 }
 
 function blockedReason(account, business, message) {
@@ -273,14 +323,18 @@ function blockedReason(account, business, message) {
     typeof account.expiresAt?.toMillis !== "function" ||
     account.expiresAt.toMillis() <= now ||
     account.instagramUserId !== message.instagramUserId
-  ) return "INSTAGRAM_RECONNECT_REQUIRED";
+  ) {
+    return "INSTAGRAM_RECONNECT_REQUIRED";
+  }
 
   if (
     !Array.isArray(account.permissions) ||
     !account.permissions.includes(
       "instagram_business_manage_messages",
     )
-  ) return "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED";
+  ) {
+    return "INSTAGRAM_MESSAGING_PERMISSION_REQUIRED";
+  }
 
   if (
     business?.autoReplyEnabled !== true ||
@@ -288,23 +342,38 @@ function blockedReason(account, business, message) {
       message.instagramUserId ||
     typeof business?.autoReplyEnabledAt?.toMillis !==
       "function"
-  ) return "AUTO_REPLY_DISABLED";
+  ) {
+    return "AUTO_REPLY_DISABLED";
+  }
 
   if (
     !Number.isSafeInteger(message.timestamp) ||
     message.timestamp < business.autoReplyEnabledAt.toMillis() ||
     message.timestamp > now + 60000 ||
     now - message.timestamp >= DAY_MS
-  ) return "MESSAGE_OUTSIDE_REPLY_WINDOW";
+  ) {
+    return "MESSAGE_OUTSIDE_REPLY_WINDOW";
+  }
 
   return null;
 }
 
-export function startInstagramMessageWorker(db, { sendReply }) {
-  const inbox = db.collection("instagramPrivateMessageInbox");
-  const connections = db.collection("instagramPrivateConnections");
-  const businesses = db.collection("instagramPrivateBusinesses");
-  const conversations = db.collection("instagramPrivateConversations");
+export function startInstagramMessageWorker(
+  db,
+  { sendReply },
+) {
+  const inbox = db.collection(
+    "instagramPrivateMessageInbox",
+  );
+  const connections = db.collection(
+    "instagramPrivateConnections",
+  );
+  const businesses = db.collection(
+    "instagramPrivateBusinesses",
+  );
+  const conversations = db.collection(
+    "instagramPrivateConversations",
+  );
 
   const planSalesReply = createInstagramSalesPlanner();
   const pending = new Map();
@@ -318,24 +387,30 @@ export function startInstagramMessageWorker(db, { sendReply }) {
   function threadId(ownerId, message) {
     return crypto
       .createHash("sha256")
-      .update(JSON.stringify([
-        ownerId,
-        message.instagramUserId,
-        message.senderId,
-      ]))
+      .update(
+        JSON.stringify([
+          ownerId,
+          message.instagramUserId,
+          message.senderId,
+        ]),
+      )
       .digest("hex");
   }
 
   function schedule(id, delay) {
     if (stopped || retryTimers.has(id)) return;
 
-    retryTimers.set(id, setTimeout(() => {
-      retryTimers.delete(id);
-      if (stopped) return;
+    retryTimers.set(
+      id,
+      setTimeout(() => {
+        retryTimers.delete(id);
 
-      pending.set(id, 0);
-      void drain();
-    }, Math.max(1000, delay)));
+        if (stopped) return;
+
+        pending.set(id, 0);
+        void drain();
+      }, Math.max(1000, delay)),
+    );
   }
 
   async function prepareReply(id) {
@@ -353,8 +428,12 @@ export function startInstagramMessageWorker(db, { sendReply }) {
       }
 
       if (
-        !["received", "reply_preparing"].includes(message.state)
-      ) return null;
+        !["received", "reply_preparing"].includes(
+          message.state,
+        )
+      ) {
+        return null;
+      }
 
       const now = Date.now();
 
@@ -387,11 +466,17 @@ export function startInstagramMessageWorker(db, { sendReply }) {
         typeof message.text !== "string" ||
         !message.text.trim() ||
         message.text.length > 20000
-      ) return skip("INVALID_INCOMING_MESSAGE");
+      ) {
+        return skip("INVALID_INCOMING_MESSAGE");
+      }
 
       const matching = await tx.get(
         connections
-          .where("instagramUserId", "==", message.instagramUserId)
+          .where(
+            "instagramUserId",
+            "==",
+            message.instagramUserId,
+          )
           .limit(2),
       );
 
@@ -406,7 +491,12 @@ export function startInstagramMessageWorker(db, { sendReply }) {
       const savedBusiness = await tx.get(businessRef);
       const business = savedBusiness.data();
 
-      const reason = blockedReason(account, business, message);
+      const reason = blockedReason(
+        account,
+        business,
+        message,
+      );
+
       if (reason) return skip(reason);
 
       const minute = Math.floor(now / 60000);
@@ -433,7 +523,7 @@ export function startInstagramMessageWorker(db, { sendReply }) {
       }
 
       const productsSnapshot = await tx.get(
-        businessRef.collection("products").limit(50),
+        businessRef.collection("products").limit(1000),
       );
 
       const products = productsSnapshot.docs
@@ -463,26 +553,59 @@ export function startInstagramMessageWorker(db, { sendReply }) {
           ? business.salesAiUsageDayCount || 0
           : 0;
 
-      // Sinov uchun: bir akkauntga kuniga 50 AI so‘rovi.
-      // Qolgan xabarlarda oddiy katalog javobi ishlaydi.
+      const aiDailyRef = db
+        .collection("instagramSalesDailyUsage")
+        .doc(new Date().toISOString().slice(0, 10));
+
+      const aiDaily = await tx.get(aiDailyRef);
+
+      const globalCount =
+        Number.isSafeInteger(aiDaily.data()?.requests)
+          ? aiDaily.data().requests
+          : 0;
+
+      const configuredCap = Number(
+        process.env.INSTAGRAM_SALES_DAILY_AI_LIMIT || 250,
+      );
+
+      const globalCap =
+        Number.isSafeInteger(configuredCap) &&
+        configuredCap >= 0 &&
+        configuredCap <= 100000
+          ? configuredCap
+          : 250;
+
       const useAi =
         !!process.env.JARVIS_API_KEY?.trim() &&
         message.text.length <= 2000 &&
         products.length > 0 &&
-        aiCount < 50;
+        aiCount < 50 &&
+        globalCount < globalCap;
 
-      tx.set(businessRef, {
-        replyUsageMinute: minute,
-        replyUsageMinuteCount: minuteCount + 1,
-        replyUsageDay: day,
-        replyUsageDayCount: dayCount + 1,
-        ...(useAi
-          ? {
-              salesAiUsageDay: day,
-              salesAiUsageDayCount: aiCount + 1,
-            }
-          : {}),
-      }, { merge: true });
+      if (useAi) {
+        tx.set(
+          aiDailyRef,
+          { requests: globalCount + 1 },
+          { merge: true },
+        );
+      }
+
+      tx.set(
+        businessRef,
+        {
+          replyUsageMinute: minute,
+          replyUsageMinuteCount: minuteCount + 1,
+          replyUsageDay: day,
+          replyUsageDayCount: dayCount + 1,
+          ...(useAi
+            ? {
+                salesAiUsageDay: day,
+                salesAiUsageDayCount: aiCount + 1,
+              }
+            : {}),
+        },
+        { merge: true },
+      );
 
       tx.update(ref, {
         state: "reply_preparing",
@@ -514,12 +637,15 @@ export function startInstagramMessageWorker(db, { sendReply }) {
     let decision = null;
     let aiError = null;
 
-    // AI chaqiruvi transaction tashqarisida bajariladi.
+    // Call AI outside the Firestore transaction.
     if (taken.useAi) {
       try {
         decision = await planSalesReply({
           text: taken.message.text,
-          products: taken.products,
+          products: selectSalesProducts(
+            taken.message.text,
+            taken.products,
+          ),
           history: taken.history,
         });
       } catch {
@@ -535,7 +661,9 @@ export function startInstagramMessageWorker(db, { sendReply }) {
         !message ||
         message.state !== "reply_preparing" ||
         message.replyClaimId !== claimId
-      ) return false;
+      ) {
+        return false;
+      }
 
       const savedAccount = await tx.get(
         connections.doc(taken.ownerId),
@@ -553,7 +681,8 @@ export function startInstagramMessageWorker(db, { sendReply }) {
 
       if (
         reason ||
-        business.autoReplyEnabledAt.toMillis() !== taken.enabledAt
+        business.autoReplyEnabledAt.toMillis() !==
+          taken.enabledAt
       ) {
         tx.update(ref, {
           state: "reply_skipped",
@@ -564,9 +693,9 @@ export function startInstagramMessageWorker(db, { sendReply }) {
         return false;
       }
 
-      // Javob oldidan katalogning hozirgi qiymatlarini o‘qiymiz.
+      // Read current catalogue values before preparing the reply.
       const freshSnapshot = await tx.get(
-        businessRef.collection("products").limit(50),
+        businessRef.collection("products").limit(1000),
       );
 
       const products = freshSnapshot.docs
@@ -622,7 +751,9 @@ export function startInstagramMessageWorker(db, { sendReply }) {
         typeof message.replyConversationId !== "string" ||
         !/^[a-f0-9]{64}$/.test(message.replyConversationId) ||
         typeof message.replyText !== "string"
-      ) return;
+      ) {
+        return;
+      }
 
       const conversationRef = conversations.doc(
         message.replyConversationId,
@@ -637,7 +768,9 @@ export function startInstagramMessageWorker(db, { sendReply }) {
           previous.lastInboxId === id ||
           previous.lastMessageTimestamp > message.timestamp
         )
-      ) return;
+      ) {
+        return;
+      }
 
       const history =
         previous?.enabledAt === message.replyContextEnabledAt &&
@@ -646,14 +779,16 @@ export function startInstagramMessageWorker(db, { sendReply }) {
           : [];
 
       history.push({
-  userText: message.text.slice(0, 1000),
-  replyText: message.replyText.slice(0, 1000),
-  productId:
-    typeof message.replyDecision?.productId === "string" &&
-    /^[a-f0-9]{64}$/.test(message.replyDecision.productId)
-      ? message.replyDecision.productId
-      : "",
-});
+        userText: message.text.slice(0, 1000),
+        replyText: message.replyText.slice(0, 1000),
+        productId:
+          typeof message.replyDecision?.productId === "string" &&
+          /^[a-f0-9]{64}$/.test(
+            message.replyDecision.productId,
+          )
+            ? message.replyDecision.productId
+            : "",
+      });
 
       tx.set(conversationRef, {
         ownerId: message.replyOwnerId,
@@ -670,6 +805,7 @@ export function startInstagramMessageWorker(db, { sendReply }) {
 
   async function drain() {
     if (busy || stopped) return;
+
     busy = true;
 
     try {
@@ -697,6 +833,7 @@ export function startInstagramMessageWorker(db, { sendReply }) {
 
           schedule(id, 10000);
           reconnect();
+
           break;
         }
       }
@@ -738,14 +875,18 @@ export function startInstagramMessageWorker(db, { sendReply }) {
               pending.delete(id);
 
               const timer = retryTimers.get(id);
+
               if (timer) clearTimeout(timer);
+
               retryTimers.delete(id);
             } else {
               const timestamp = change.doc.data().timestamp;
 
               pending.set(
                 id,
-                Number.isSafeInteger(timestamp) ? timestamp : 0,
+                Number.isSafeInteger(timestamp)
+                  ? timestamp
+                  : 0,
               );
             }
           }

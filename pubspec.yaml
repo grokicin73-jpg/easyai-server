@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+3
+version: 1.0.0+19
 
 environment:
   sdk: ^3.12.2
@@ -39,6 +39,19 @@ dependencies:
   audioplayers: ^6.1.0
   video_player: ^2.13.0
   file_saver: ^0.4.0
+  image_picker: ^1.1.2
+  android_id: ^0.5.2+1
+  in_app_purchase: ^3.3.0
+  in_app_purchase_android: ^0.5.0
+  flutter_launcher_icons: ^0.14.4
+  gal: ^2.3.3
+  in_app_update: ^5.0.0
+  record: ^7.1.1
+  path_provider: ^2.1.6
+  flutter_pcm_sound: ^3.3.3
+  flutter_secure_storage: ^11.2.0
+  url_launcher: ^6.3.3
+
 
 dev_dependencies:
   flutter_test:
@@ -62,8 +75,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-assets: 
-    - assets/sounds/click.mp3  
+  assets: 
+    - assets/sounds/click.mp3 
+    - assets/sounds/images/app_icon.jpg 
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
@@ -94,3 +108,7 @@ assets:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/sounds/images/app_icon.jpg"

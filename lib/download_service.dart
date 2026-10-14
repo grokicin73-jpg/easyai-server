@@ -1,6 +1,6 @@
-import 'dart:typed_data';
-import 'package:file_saver/file_saver.dart';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:gal/gal.dart';
 
 class DownloadService {
   static Future<void> downloadVideo(String videoUrl) async {
@@ -19,15 +19,21 @@ class DownloadService {
     final http.Response response = await http.get(uri);
 
     if (response.statusCode != 200) {
-      throw Exception('Videoniki yuklab bo\'lmadi. Kod: ${response.statusCode}');
+      throw Exception(
+        'Videoni yuklab bo\'lmadi. Kod: ${response.statusCode}',
+      );
     }
 
-   final Uint8List videoBytes = response.bodyBytes;
-    await FileSaver.instance.saveFile(
-      name: 'video_${DateTime.now().millisecondsSinceEpoch}',
-      bytes: videoBytes,
-      fileExtension: 'mp4',
-      mimeType: MimeType.mpeg,
-    );
+    final String filePath =
+        '${Directory.systemTemp.path}/easyai_${DateTime.now().millisecondsSinceEpoch}.mp4';
+
+    final File file = File(filePath);
+    await file.writeAsBytes(response.bodyBytes);
+
+    await Gal.putVideo(file.path);
+
+    if (await file.exists()) {
+      await file.delete();
+    }
   }
 }

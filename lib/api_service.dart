@@ -1,14 +1,17 @@
 import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:android_id/android_id.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 class ApiService {
   String reviewCode = '';
 
   static const _storage = FlutterSecureStorage();
   static const _sessionKey = 'easyai_instagram_session_v1';
+
   static Future<String>? _credentialFuture;
 
   final Dio _dio = Dio(
@@ -19,7 +22,176 @@ class ApiService {
     ),
   );
 
-  // Server bilan aloqani tekshirish
+  Future<Map<String, String>> getJarvisHeaders({
+    required String language,
+  }) async {
+    final credential = await _credential();
+
+    const androidIdPlugin = AndroidId();
+    final rawId = await androidIdPlugin.getId();
+    final deviceId = rawId?.trim().toLowerCase() ?? '';
+
+    if (!RegExp(r'^[a-f0-9]{16}$').hasMatch(deviceId)) {
+      throw StateError('JARVIS_DEVICE_ID_UNAVAILABLE');
+    }
+
+    final headers = <String, String>{
+      'Authorization': 'Bearer $credential',
+      'x-easyai-device-id': deviceId,
+      'x-jarvis-language': {
+        'English': 'en',
+        'Кыргызча': 'ky',
+        'Русский': 'ru',
+        'Türkçe': 'tr',
+      }[language] ?? 'en',
+    };
+
+    final response = await _dio.post(
+      '/api/jarvis/session',
+      options: Options(
+        headers: headers,
+        sendTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+
+    final data = response.data;
+
+    if (data is! Map || data['success'] != true) {
+      throw StateError('JARVIS_SESSION_FAILED');
+    }
+
+    return headers;
+  }
+
+  String createJarvisRequestId() => _randomId();
+
+  Future<bool> buyJarvisCredits() async {
+    final store = InAppPurchase.instance;
+
+    if (!await store.isAvailable()) return false;
+
+    final result = await store.queryProductDetails({
+      'credits_100',
+    });
+
+    if (result.error != null || result.productDetails.length != 1) {
+      return false;
+    }
+
+    return store.buyConsumable(
+      purchaseParam: PurchaseParam(
+        productDetails: result.productDetails.single,
+      ),
+      autoConsume: false,
+    );
+  }
+
+  Future<Map<String, dynamic>> getCreditAccount(
+    String language,
+  ) async {
+    final headers = await getJarvisHeaders(language: language);
+
+    final response = await _dio.get(
+      '/api/jarvis/account',
+      options: Options(headers: headers),
+    );
+
+    final data = response.data;
+
+    if (data is! Map || data['success'] != true) {
+      throw const FormatException('ACCOUNT_UNAVAILABLE');
+    }
+
+    return Map<String, dynamic>.from(data);
+  }
+
+  Future<List<Map<String, dynamic>>> getAutomationTasks(
+    String language,
+  ) async {
+    final headers = await getJarvisHeaders(language: language);
+
+    final response = await _dio.get(
+      '/api/jarvis/tasks',
+      options: Options(headers: headers),
+    );
+
+    final data = response.data;
+
+    if (data is! Map ||
+        data['success'] != true ||
+        data['tasks'] is! List) {
+      throw const FormatException('TASKS_UNAVAILABLE');
+    }
+
+    return (data['tasks'] as List)
+        .map(
+          (item) => Map<String, dynamic>.from(item as Map),
+        )
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> startAutomation({
+    required String language,
+    required String requestId,
+    required String command,
+    required String title,
+    required String prompt,
+    required String caption,
+  }) async {
+    final headers = await getJarvisHeaders(language: language);
+
+    final response = await _dio.post(
+      '/api/jarvis/tasks',
+      options: Options(headers: headers),
+      data: {
+        'requestId': requestId,
+        'command': command,
+        'draft': {
+          'title': title,
+          'prompt': prompt,
+          'caption': caption,
+        },
+      },
+    );
+
+    final data = response.data;
+
+    if (data is! Map ||
+        data['success'] != true ||
+        data['task'] is! Map) {
+      throw const FormatException('TASK_UNAVAILABLE');
+    }
+
+    return Map<String, dynamic>.from(data['task'] as Map);
+  }
+
+  Future<void> checkAutomationTask(
+    String language,
+    String id,
+  ) async {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(id)) {
+      throw ArgumentError('INVALID_TASK_ID');
+    }
+
+    final headers = await getJarvisHeaders(language: language);
+
+    await _dio.post(
+      '/api/jarvis/tasks/$id/check',
+      options: Options(headers: headers),
+    );
+  }
+
+  Future<Options> _deviceOptions() async {
+    final credential = await _credential();
+
+    return Options(
+      headers: {
+        'Authorization': 'Bearer $credential',
+      },
+    );
+  }
+
   Future<bool> testConnection() async {
     try {
       final response = await _dio.get('/');
@@ -29,7 +201,6 @@ class ApiService {
     }
   }
 
-  // Google Play xaridini tekshirish
   Future<bool> verifyPurchase({
     required String purchaseToken,
     required String productId,
@@ -40,6 +211,7 @@ class ApiService {
 
       final response = await _dio.post(
         '/api/verify-purchase',
+        options: await _deviceOptions(),
         data: {
           'purchaseToken': purchaseToken,
           'productId': productId,
@@ -55,7 +227,6 @@ class ApiService {
     }
   }
 
-  // Veo orqali video yaratish
   Future<String> generateVideoWithVeo({
     required String prompt,
     required String selectedModel,
@@ -76,6 +247,7 @@ class ApiService {
 
       final response = await _dio.post(
         '/api/generate-video',
+        options: await _deviceOptions(),
         data: formData,
       );
 
@@ -88,12 +260,12 @@ class ApiService {
           return videoUrl;
         }
       }
-    } on DioException catch (e) {
-      final errorData = e.response?.data;
+    } on DioException catch (error) {
+      final data = error.response?.data;
 
-      if (e.response?.statusCode == 403 &&
-          errorData is Map &&
-          errorData['code'] == 'FREE_LIMIT_REACHED') {
+      if (error.response?.statusCode == 403 &&
+          data is Map &&
+          data['code'] == 'FREE_LIMIT_REACHED') {
         throw Exception('FREE_LIMIT_REACHED');
       }
 
@@ -103,7 +275,18 @@ class ApiService {
     throw Exception('VIDEO_GENERATION_FAILED');
   }
 
-  // Shu ilova uchun maxfiy Instagram ulanish kaliti
+  static String _randomId() {
+    final random = Random.secure();
+
+    return List.generate(
+      32,
+      (_) => random
+          .nextInt(256)
+          .toRadixString(16)
+          .padLeft(2, '0'),
+    ).join();
+  }
+
   static Future<String> _loadCredential() async {
     final saved = await _storage.read(key: _sessionKey);
 
@@ -112,15 +295,7 @@ class ApiService {
       return saved;
     }
 
-    final random = Random.secure();
-
-    final credential = List.generate(
-      32,
-      (_) => random
-          .nextInt(256)
-          .toRadixString(16)
-          .padLeft(2, '0'),
-    ).join();
+    final credential = _randomId();
 
     await _storage.write(
       key: _sessionKey,
@@ -130,18 +305,19 @@ class ApiService {
     return credential;
   }
 
-  // Serverda Instagram ulanish sessiyasini tayyorlash
-  Future<Options> _instagramOptions() async {
+  static Future<String> _credential() async {
     final pending = _credentialFuture ??= _loadCredential();
 
-    String credential;
-
     try {
-      credential = await pending;
+      return await pending;
     } catch (_) {
       _credentialFuture = null;
       rethrow;
     }
+  }
+
+  Future<Options> _instagramOptions() async {
+    final credential = await _credential();
 
     final options = Options(
       headers: {
@@ -157,7 +333,6 @@ class ApiService {
     return options;
   }
 
-  // Instagram ruxsat oynasini telefon brauzerida ochish
   Future<void> connectInstagram() async {
     final options = await _instagramOptions();
 
@@ -192,7 +367,6 @@ class ApiService {
     }
   }
 
-  // Instagram ulanganligini tekshirish
   Future<Map<String, dynamic>> getInstagramStatus() async {
     final options = await _instagramOptions();
 
@@ -210,7 +384,6 @@ class ApiService {
     return Map<String, dynamic>.from(data);
   }
 
-  // EasyAI serveridagi Instagram ulanishini o‘chirish
   Future<void> disconnectInstagram() async {
     final options = await _instagramOptions();
 
@@ -219,6 +392,7 @@ class ApiService {
       options: options,
     );
   }
+
   Future<String> uploadInstagramVideo(String videoPath) async {
     final options = await _instagramOptions();
 
@@ -263,14 +437,8 @@ class ApiService {
 
     return videoUrl;
   }
-  String createInstagramReelRequestId() {
-    final random = Random.secure();
 
-    return List.generate(
-      32,
-      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
-  }
+  String createInstagramReelRequestId() => _randomId();
 
   void _checkInstagramReelId(String value) {
     if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(value)) {
@@ -349,7 +517,10 @@ class ApiService {
 
     return _instagramReelData(response);
   }
- Map<String, dynamic> _businessData(Response<dynamic> response) {
+
+  Map<String, dynamic> _businessData(
+    Response<dynamic> response,
+  ) {
     final data = response.data;
 
     if (data is! Map || data['success'] != true) {
@@ -359,12 +530,38 @@ class ApiService {
     return Map<String, dynamic>.from(data);
   }
 
-  Future<Map<String, dynamic>> getInstagramProducts() async {
+  Future<Map<String, dynamic>> getInstagramProducts({
+    String search = '',
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final query = search.trim();
+
+    if (query.length > 120) {
+      throw ArgumentError('INVALID_CATALOG_SEARCH');
+    }
+
+    if (limit < 1 || limit > 50) {
+      throw ArgumentError('INVALID_CATALOG_PAGE_SIZE');
+    }
+
+    if (cursor != null &&
+        cursor.isNotEmpty &&
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(cursor)) {
+      throw ArgumentError('INVALID_CATALOG_CURSOR');
+    }
+
     final options = await _instagramOptions();
 
     final response = await _dio.get(
       '/api/instagram/business/products',
       options: options,
+      queryParameters: {
+        'limit': limit,
+        if (query.isNotEmpty) 'q': query,
+        if (cursor != null && cursor.isNotEmpty)
+          'cursor': cursor,
+      },
     );
 
     return _businessData(response);
@@ -397,7 +594,9 @@ class ApiService {
     _businessData(response);
   }
 
-  Future<void> deleteInstagramProduct(String productId) async {
+  Future<void> deleteInstagramProduct(
+    String productId,
+  ) async {
     _checkInstagramReelId(productId);
 
     final options = await _instagramOptions();
@@ -408,8 +607,11 @@ class ApiService {
     );
 
     _businessData(response);
-  } 
-  Future<bool> setInstagramAutoReplyEnabled(bool enabled) async {
+  }
+
+  Future<bool> setInstagramAutoReplyEnabled(
+    bool enabled,
+  ) async {
     final options = await _instagramOptions();
 
     final response = await _dio.put(
@@ -428,5 +630,74 @@ class ApiService {
     }
 
     return saved;
+  }
+
+  Future<void> reportAIContent({
+    required String contentType,
+    required String reason,
+    required String language,
+    String details = '',
+    String content = '',
+    String prompt = '',
+    String model = '',
+    String videoUrl = '',
+  }) async {
+    const allowedTypes = {
+      'video',
+      'chat',
+      'voice',
+    };
+
+    const allowedReasons = {
+      'sexual',
+      'violence',
+      'hate',
+      'child_safety',
+      'misleading',
+      'other',
+    };
+
+    if (!allowedTypes.contains(contentType) ||
+        !allowedReasons.contains(reason)) {
+      throw ArgumentError('INVALID_CONTENT_REPORT');
+    }
+
+    if (details.length > 2000 ||
+        content.length > 20000 ||
+        prompt.length > 20000 ||
+        model.length > 100 ||
+        language.length > 40 ||
+        videoUrl.length > 4096) {
+      throw ArgumentError('CONTENT_REPORT_TOO_LONG');
+    }
+
+    final response = await _dio.post(
+      '/api/content-reports',
+      data: {
+        'contentType': contentType,
+        'reason': reason,
+        'language': language,
+        'details': details.trim(),
+        'content': content,
+        'prompt': prompt,
+        'model': model,
+        'videoUrl': videoUrl,
+      },
+      options: Options(
+        sendTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+
+    final data = response.data;
+
+    if ((response.statusCode != 200 &&
+            response.statusCode != 201) ||
+        data is! Map ||
+        data['success'] != true ||
+        data['reportId'] is! String ||
+        (data['reportId'] as String).isEmpty) {
+      throw const FormatException('CONTENT_REPORT_FAILED');
+    }
   }
 }

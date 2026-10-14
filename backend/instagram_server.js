@@ -3,12 +3,15 @@ import { FieldValue } from "firebase-admin/firestore";
 import multer from "multer";
 import path from "node:path";
 import { open, unlink } from "node:fs/promises";
+
 import {
   attachInstagramBusiness,
 } from "./instagram_business_server.js";
+
 import {
   startInstagramMessageWorker,
 } from "./instagram_message_worker.js";
+
 const BASE = "https://easyai-server.onrender.com";
 const REDIRECT = `${BASE}/instagram/callback`;
 const GRAPH = "https://graph.instagram.com/v25.0";
@@ -23,13 +26,16 @@ const COOKIE = {
 const hash = (value) =>
   crypto.createHash("sha256").update(value).digest("hex");
 
-const nonce = () => crypto.randomBytes(32).toString("hex");
+const nonce = () =>
+  crypto.randomBytes(32).toString("hex");
 
 const isKey = (value) =>
-  typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+  typeof value === "string" &&
+  /^[a-f0-9]{64}$/.test(value);
 
 const isId = (value) =>
-  typeof value === "string" && /^\d+$/.test(value);
+  typeof value === "string" &&
+  /^\d+$/.test(value);
 
 const numericId = (value) =>
   isId(value)
@@ -38,16 +44,36 @@ const numericId = (value) =>
       ? String(value)
       : null;
 
-export function attachInstagram(app, db, { videosDirectory }) {
-  attachInstagramBusiness(app, db, { owner });  
+export function attachInstagram(
+  app,
+  db,
+  { videosDirectory },
+) {
+  const businessService = attachInstagramBusiness(
+    app,
+    db,
+    { owner },
+  );
+
   startInstagramMessageWorker(db, {
     sendReply: sendInstagramReply,
   });
-  const identities = db.collection("instagramPrivateIdentities");
-  const tickets = db.collection("instagramPrivateTickets");
-  const states = db.collection("instagramPrivateStates");
-  const connections = db.collection("instagramPrivateConnections");
-  const reelJobs = db.collection("instagramPrivateReelJobs");
+
+  const identities = db.collection(
+    "instagramPrivateIdentities",
+  );
+  const tickets = db.collection(
+    "instagramPrivateTickets",
+  );
+  const states = db.collection(
+    "instagramPrivateStates",
+  );
+  const connections = db.collection(
+    "instagramPrivateConnections",
+  );
+  const reelJobs = db.collection(
+    "instagramPrivateReelJobs",
+  );
 
   const activeUploads = new Set();
 
@@ -67,24 +93,37 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
   function settings() {
     const appId = process.env.INSTAGRAM_APP_ID?.trim();
-    const appSecret = process.env.INSTAGRAM_APP_SECRET?.trim();
+    const appSecret =
+      process.env.INSTAGRAM_APP_SECRET?.trim();
     const secret =
       process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY?.trim();
 
-    if (!appId || !appSecret || !secret || secret.length < 32) {
+    if (
+      !appId ||
+      !appSecret ||
+      !secret ||
+      secret.length < 32
+    ) {
       throw new Error("INSTAGRAM_CONFIG_MISSING");
     }
 
     return {
       appId,
       appSecret,
-      key: crypto.createHash("sha256").update(secret).digest(),
+      key: crypto
+        .createHash("sha256")
+        .update(secret)
+        .digest(),
     };
   }
 
   function seal(token, key, ownerId) {
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const cipher = crypto.createCipheriv(
+      "aes-256-gcm",
+      key,
+      iv,
+    );
 
     cipher.setAAD(Buffer.from(ownerId));
 
@@ -115,13 +154,19 @@ export function attachInstagram(app, db, { videosDirectory }) {
     );
 
     decipher.setAAD(Buffer.from(ownerId));
-    decipher.setAuthTag(Buffer.from(saved.tag, "base64"));
+
+    decipher.setAuthTag(
+      Buffer.from(saved.tag, "base64"),
+    );
 
     return Buffer.concat([
-      decipher.update(Buffer.from(saved.ciphertext, "base64")),
+      decipher.update(
+        Buffer.from(saved.ciphertext, "base64"),
+      ),
       decipher.final(),
     ]).toString("utf8");
   }
+
   async function sendInstagramReply(inboxId) {
     if (!isKey(inboxId)) {
       throw new Error("INVALID_INBOX_ID");
@@ -135,8 +180,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
       const savedMessage = await tx.get(inboxRef);
       const message = savedMessage.data();
 
-      // Yuborilgan yoki yuborilishi boshlangan xabar
-      // qayta yuborilmaydi.
+      // Do not repeat an already started send.
       if (!message || message.state !== "reply_ready") {
         return null;
       }
@@ -165,7 +209,8 @@ export function attachInstagram(app, db, { videosDirectory }) {
       );
 
       const savedBusiness = await tx.get(
-        db.collection("instagramPrivateBusinesses").doc(ownerId),
+        db.collection("instagramPrivateBusinesses")
+          .doc(ownerId),
       );
 
       const matchingAccounts = await tx.get(
@@ -188,7 +233,6 @@ export function attachInstagram(app, db, { videosDirectory }) {
           : null;
 
       const now = Date.now();
-
       let reason = null;
 
       if (
@@ -308,8 +352,6 @@ export function attachInstagram(app, db, { videosDirectory }) {
         [accessToken],
       );
 
-      // Natijasi noaniq bo‘lgan yuborishni
-      // avtomatik qayta urinishga qo‘ymaymiz.
       const clearlyRejected =
         Number.isInteger(error.httpStatus) &&
         error.httpStatus >= 400 &&
@@ -340,7 +382,13 @@ export function attachInstagram(app, db, { videosDirectory }) {
     )?.[1];
   }
 
+  const trustedOwner = Symbol("internalInstagramOwner");
+
   async function owner(req, res) {
+    if (req[trustedOwner]) {
+      return req[trustedOwner];
+    }
+
     const token = credential(req);
     const ownerId = token ? hash(token) : null;
 
@@ -371,17 +419,23 @@ export function attachInstagram(app, db, { videosDirectory }) {
       }
 
       tx.delete(ref);
+
       return snap.data();
     });
   }
 
   function logError(label, error, secrets = []) {
     let message = String(
-      error.metaMessage || error.message || "Request failed",
+      error.metaMessage ||
+      error.message ||
+      "Request failed",
     );
 
     for (const secret of secrets.filter(Boolean)) {
-      message = message.replaceAll(secret, "[REDACTED]");
+      message = message.replaceAll(
+        secret,
+        "[REDACTED]",
+      );
     }
 
     message = message.replace(
@@ -410,7 +464,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
     const data = await response.json();
 
     if (!response.ok || data.error) {
-      const error = new Error("INSTAGRAM_META_REQUEST_FAILED");
+      const error = new Error(
+        "INSTAGRAM_META_REQUEST_FAILED",
+      );
 
       error.httpStatus = response.status;
       error.metaCode = data.error?.code;
@@ -424,11 +480,13 @@ export function attachInstagram(app, db, { videosDirectory }) {
     return data;
   }
 
-  // Token orqali professional hisob ID'sini tekshiramiz.
-  // OAuth javobidagi user_id joylash ID'si sifatida ishlatilmaydi.
   async function profile(accessToken) {
     const url = new URL(`${GRAPH}/me`);
-    url.searchParams.set("fields", "user_id,username");
+
+    url.searchParams.set(
+      "fields",
+      "user_id,username",
+    );
 
     const result = await meta(url, {
       headers: {
@@ -449,7 +507,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
       typeof user?.username !== "string" ||
       !user.username
     ) {
-      throw new Error("INSTAGRAM_PROFILE_ID_MISSING_OR_UNSAFE");
+      throw new Error(
+        "INSTAGRAM_PROFILE_ID_MISSING_OR_UNSAFE",
+      );
     }
 
     return {
@@ -479,6 +539,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
         res.set("Cache-Control", "no-store");
 
         const ownerId = await owner(req, res);
+
         if (!ownerId) return;
 
         const account = (
@@ -501,7 +562,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
         activeUploads.add(ownerId);
 
-        const release = () => activeUploads.delete(ownerId);
+        const release = () =>
+          activeUploads.delete(ownerId);
+
         res.once("finish", release);
         res.once("close", release);
 
@@ -544,7 +607,12 @@ export function attachInstagram(app, db, { videosDirectory }) {
           const header = Buffer.alloc(12);
 
           try {
-            await file.read(header, 0, header.length, 0);
+            await file.read(
+              header,
+              0,
+              header.length,
+              0,
+            );
           } finally {
             await file.close();
           }
@@ -556,7 +624,8 @@ export function attachInstagram(app, db, { videosDirectory }) {
             header.toString("ascii", 4, 8) !== "ftyp" ||
             boxSize < 16 ||
             boxSize > req.file.size ||
-            ["qt  ", "heic", "heix", "avif", "avis"].includes(brand)
+            ["qt  ", "heic", "heix", "avif", "avis"]
+              .includes(brand)
           ) {
             await remove();
 
@@ -568,11 +637,16 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
           res.json({
             success: true,
-            videoUrl: `${BASE}/videos/${path.basename(req.file.path)}`,
+            videoUrl:
+              `${BASE}/videos/${path.basename(req.file.path)}`,
           });
         } catch (error) {
           await remove();
-          logError("INSTAGRAM UPLOAD ERROR:", error);
+
+          logError(
+            "INSTAGRAM UPLOAD ERROR:",
+            error,
+          );
 
           if (!res.headersSent) {
             res.status(500).json({
@@ -618,6 +692,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
     "/api/instagram/connect",
     wrap(async (req, res) => {
       const ownerId = await owner(req, res);
+
       if (!ownerId) return;
 
       try {
@@ -634,6 +709,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
       await db.runTransaction(async (tx) => {
         const identity = await tx.get(ref);
+
         const generation =
           (identity.data().connectionGeneration || 0) + 1;
 
@@ -644,13 +720,16 @@ export function attachInstagram(app, db, { videosDirectory }) {
         tx.set(tickets.doc(hash(ticket)), {
           ownerId,
           generation,
-          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+          expiresAt: new Date(
+            Date.now() + 5 * 60 * 1000,
+          ),
         });
       });
 
       res.set("Cache-Control", "no-store").json({
         success: true,
-        connectUrl: `${BASE}/instagram/login?ticket=${ticket}`,
+        connectUrl:
+          `${BASE}/instagram/login?ticket=${ticket}`,
       });
     }),
   );
@@ -666,13 +745,14 @@ export function attachInstagram(app, db, { videosDirectory }) {
       if (!isKey(req.query.ticket)) {
         return res.status(400).send(
           "Start Instagram connection from EasyAI. / " +
-            "EasyAI аркылуу баштаңыз. / " +
-            "Начните подключение в EasyAI. / " +
-            "EasyAI üzerinden başlayın.",
+          "EasyAI аркылуу баштаңыз. / " +
+          "Начните подключение в EasyAI. / " +
+          "EasyAI üzerinden başlayın.",
         );
       }
 
       const config = settings();
+
       const record = await consume(
         tickets.doc(hash(req.query.ticket)),
       );
@@ -680,9 +760,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
       if (!record) {
         return res.status(403).send(
           "Link expired. / " +
-            "Шилтеменин мөөнөтү бүттү. / " +
-            "Ссылка истекла. / " +
-            "Bağlantının süresi doldu.",
+          "Шилтеменин мөөнөтү бүттү. / " +
+          "Ссылка истекла. / " +
+          "Bağlantının süresi doldu.",
         );
       }
 
@@ -691,7 +771,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
       await states.doc(hash(state)).set({
         ownerId: record.ownerId,
         generation: record.generation,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        expiresAt: new Date(
+          Date.now() + 10 * 60 * 1000,
+        ),
       });
 
       res.cookie("ig_login_state", state, {
@@ -705,10 +787,10 @@ export function attachInstagram(app, db, { videosDirectory }) {
         response_type: "code",
         force_reauth: "true",
         scope: [
-  "instagram_business_basic",
-  "instagram_business_content_publish",
-  "instagram_business_manage_messages",
-].join(","),
+          "instagram_business_basic",
+          "instagram_business_content_publish",
+          "instagram_business_manage_messages",
+        ].join(","),
         state,
       });
 
@@ -731,7 +813,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
       const cookie = (req.headers.cookie || "")
         .split(";")
         .map((item) => item.trim())
-        .find((item) => item.startsWith("ig_login_state="))
+        .find(
+          (item) => item.startsWith("ig_login_state="),
+        )
         ?.slice("ig_login_state=".length);
 
       const retryMessage =
@@ -744,7 +828,10 @@ export function attachInstagram(app, db, { videosDirectory }) {
         return res.status(403).send(retryMessage);
       }
 
-      const record = await consume(states.doc(hash(state)));
+      const record = await consume(
+        states.doc(hash(state)),
+      );
+
       res.clearCookie("ig_login_state", COOKIE);
 
       if (!record) {
@@ -763,6 +850,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
       try {
         const config = settings();
+
         secrets.push(config.appSecret);
 
         const form = new FormData();
@@ -891,9 +979,9 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
         res.type("text/plain").send(
           "Instagram connected. Return to EasyAI.\n" +
-            "Instagram туташты. EasyAI колдонмосуна кайтыңыз.\n" +
-            "Instagram подключён. Вернитесь в EasyAI.\n" +
-            "Instagram bağlandı. EasyAI uygulamasına dönün.",
+          "Instagram туташты. EasyAI колдонмосуна кайтыңыз.\n" +
+          "Instagram подключён. Вернитесь в EasyAI.\n" +
+          "Instagram bağlandı. EasyAI uygulamasına dönün.",
         );
       } catch (error) {
         logError(
@@ -904,10 +992,10 @@ export function attachInstagram(app, db, { videosDirectory }) {
 
         res.status(502).type("text/plain").send(
           "Instagram connection could not be verified.\n" +
-            "Instagram байланышы текшерилген жок.\n" +
-            "Не удалось проверить подключение Instagram.\n" +
-            "Instagram bağlantısı doğrulanamadı.\n\n" +
-            retryMessage,
+          "Instagram байланышы текшерилген жок.\n" +
+          "Не удалось проверить подключение Instagram.\n" +
+          "Instagram bağlantısı doğrulanamadı.\n\n" +
+          retryMessage,
         );
       }
     }),
@@ -917,6 +1005,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
     "/api/instagram/status",
     wrap(async (req, res) => {
       const ownerId = await owner(req, res);
+
       if (!ownerId) return;
 
       const account = (
@@ -931,9 +1020,12 @@ export function attachInstagram(app, db, { videosDirectory }) {
           account.profileVerified === true,
         needsReconnect:
           !!account &&
-          (expired(account) ||
-            account.profileVerified !== true),
-        instagramUserId: account?.instagramUserId || null,
+          (
+            expired(account) ||
+            account.profileVerified !== true
+          ),
+        instagramUserId:
+          account?.instagramUserId || null,
         username: account?.username || null,
         expiresAt:
           account?.expiresAt?.toDate().toISOString() || null,
@@ -945,6 +1037,7 @@ export function attachInstagram(app, db, { videosDirectory }) {
     "/api/instagram/connection",
     wrap(async (req, res) => {
       const ownerId = await owner(req, res);
+
       if (!ownerId) return;
 
       await db.runTransaction(async (tx) => {
@@ -959,63 +1052,579 @@ export function attachInstagram(app, db, { videosDirectory }) {
         tx.delete(connections.doc(ownerId));
       });
 
-      res.json({ success: true });
+      res.json({
+        success: true,
+      });
     }),
   );
 
+  const prepareReel = wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    const ownerId = await owner(req, res);
+
+    if (!ownerId) return;
+
+    const {
+      requestId,
+      videoUrl,
+      caption = "",
+    } = req.body || {};
+
+    if (
+      !isKey(requestId) ||
+      typeof videoUrl !== "string" ||
+      typeof caption !== "string" ||
+      caption.length > 2200
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_REEL_REQUEST",
+      });
+    }
+
+    let url;
+
+    try {
+      url = new URL(videoUrl);
+    } catch {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_VIDEO_URL",
+      });
+    }
+
+    if (
+      url.origin !== BASE ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      !/^\/videos\/[a-zA-Z0-9_-]+\.mp4$/.test(
+        url.pathname,
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "USE_EASYAI_VIDEO_URL",
+      });
+    }
+
+    const account = (
+      await connections.doc(ownerId).get()
+    ).data();
+
+    if (
+      expired(account) ||
+      account.profileVerified !== true
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "INSTAGRAM_RECONNECT_REQUIRED",
+      });
+    }
+
+    if (!canPublish(account)) {
+      return res.status(403).json({
+        success: false,
+        error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
+      });
+    }
+
+    const jobId = hash(`${ownerId}:${requestId}`);
+    const jobRef = reelJobs.doc(jobId);
+
+    const fingerprint = hash(
+      JSON.stringify([
+        url.href,
+        caption,
+        account.instagramUserId,
+      ]),
+    );
+
+    const existing = await db.runTransaction(
+      async (tx) => {
+        const job = await tx.get(jobRef);
+
+        if (job.exists) {
+          return job.data();
+        }
+
+        tx.create(jobRef, {
+          ownerId,
+          instagramUserId: account.instagramUserId,
+          fingerprint,
+          state: "creating",
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        return null;
+      },
+    );
+
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        return res.status(409).json({
+          success: false,
+          error: "REQUEST_ID_ALREADY_USED",
+        });
+      }
+
+      return res.json({
+        success: existing.state === "processing",
+        jobId,
+        state: existing.state,
+      });
+    }
+
+    let accessToken;
+
+    try {
+      accessToken = openInstagramToken(
+        account,
+        ownerId,
+      );
+
+      const body = new URLSearchParams({
+        media_type: "REELS",
+        video_url: url.href,
+        caption,
+        share_to_feed: "true",
+      });
+
+      const result = await meta(
+        `${GRAPH}/${account.instagramUserId}/media`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body,
+        },
+      );
+
+      const containerId = numericId(result.id);
+
+      if (!containerId) {
+        throw new Error("INVALID_CONTAINER_ID");
+      }
+
+      await jobRef.update({
+        containerId,
+        state: "processing",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      res.json({
+        success: true,
+        jobId,
+        state: "processing",
+      });
+    } catch (error) {
+      logError(
+        "INSTAGRAM PREPARE ERROR:",
+        error,
+        [accessToken],
+      );
+
+      await jobRef.update({
+        state: "needs_check",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      res.status(502).json({
+        success: false,
+        jobId,
+        error: "INSTAGRAM_PREPARE_NEEDS_CHECK",
+      });
+    }
+  });
+
   app.post(
     "/api/instagram/reels/prepare",
-    wrap(async (req, res) => {
-      res.set("Cache-Control", "no-store");
+    prepareReel,
+  );
 
-      const ownerId = await owner(req, res);
-      if (!ownerId) return;
+  const reelStatus = wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
 
-      const {
-        requestId,
-        videoUrl,
-        caption = "",
-      } = req.body || {};
+    const ownerId = await owner(req, res);
+
+    if (!ownerId) return;
+
+    if (!isKey(req.params.jobId)) {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_JOB_ID",
+      });
+    }
+
+    const jobRef = reelJobs.doc(req.params.jobId);
+    const job = (await jobRef.get()).data();
+
+    if (!job || job.ownerId !== ownerId) {
+      return res.status(404).json({
+        success: false,
+        error: "REEL_NOT_FOUND",
+      });
+    }
+
+    if (!job.containerId || job.state === "published") {
+      return res.json({
+        success: true,
+        jobId: req.params.jobId,
+        state: job.state,
+        mediaId: job.mediaId || null,
+      });
+    }
+
+    const account = (
+      await connections.doc(ownerId).get()
+    ).data();
+
+    if (
+      expired(account) ||
+      account.instagramUserId !== job.instagramUserId
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "INSTAGRAM_RECONNECT_REQUIRED",
+      });
+    }
+
+    let accessToken;
+
+    try {
+      accessToken = openInstagramToken(
+        account,
+        ownerId,
+      );
+
+      const url = new URL(
+        `${GRAPH}/${job.containerId}`,
+      );
+
+      url.searchParams.set(
+        "fields",
+        "status_code",
+      );
+
+      const result = await meta(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
       if (
-        !isKey(requestId) ||
-        typeof videoUrl !== "string" ||
-        typeof caption !== "string" ||
-        caption.length > 2200
+        ![
+          "IN_PROGRESS",
+          "FINISHED",
+          "ERROR",
+          "EXPIRED",
+          "PUBLISHED",
+        ].includes(result.status_code)
       ) {
-        return res.status(400).json({
+        throw new Error("INVALID_CONTAINER_STATUS");
+      }
+
+      await jobRef.update({
+        containerStatus: result.status_code,
+        checkedAt: FieldValue.serverTimestamp(),
+      });
+
+      res.json({
+        success: true,
+        jobId: req.params.jobId,
+        state: job.state,
+        containerStatus: result.status_code,
+        readyToPublish:
+          job.state === "processing" &&
+          result.status_code === "FINISHED",
+      });
+    } catch (error) {
+      logError(
+        "INSTAGRAM STATUS ERROR:",
+        error,
+        [accessToken],
+      );
+
+      res.status(502).json({
+        success: false,
+        error: "INSTAGRAM_STATUS_FAILED",
+      });
+    }
+  });
+
+  app.get(
+    "/api/instagram/reels/:jobId/status",
+    reelStatus,
+  );
+
+  const publishReel = wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    const ownerId = await owner(req, res);
+
+    if (!ownerId) return;
+
+    if (
+      !isKey(req.params.jobId) ||
+      req.body?.confirm !== true
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "PUBLISH_CONFIRMATION_REQUIRED",
+      });
+    }
+
+    const jobRef = reelJobs.doc(req.params.jobId);
+
+    const claimed = await db.runTransaction(
+      async (tx) => {
+        const job = (
+          await tx.get(jobRef)
+        ).data();
+
+        const account = (
+          await tx.get(connections.doc(ownerId))
+        ).data();
+
+        if (!job || job.ownerId !== ownerId) {
+          return {
+            error: "REEL_NOT_FOUND",
+            status: 404,
+          };
+        }
+
+        if (job.state === "published") {
+          return {
+            published: true,
+            mediaId: job.mediaId,
+          };
+        }
+
+        if (
+          expired(account) ||
+          account.instagramUserId !== job.instagramUserId
+        ) {
+          return {
+            error: "INSTAGRAM_RECONNECT_REQUIRED",
+            status: 409,
+          };
+        }
+
+        if (!canPublish(account)) {
+          return {
+            error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
+            status: 403,
+          };
+        }
+
+        if (
+          !job.containerId ||
+          job.state !== "processing"
+        ) {
+          return {
+            error: "REEL_NOT_READY_OR_ALREADY_SUBMITTED",
+            status: 409,
+          };
+        }
+
+        tx.update(jobRef, {
+          state: "publishing",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return { job, account };
+      },
+    );
+
+    if (claimed.error) {
+      return res.status(claimed.status).json({
+        success: false,
+        error: claimed.error,
+      });
+    }
+
+    if (claimed.published) {
+      return res.json({
+        success: true,
+        state: "published",
+        mediaId: claimed.mediaId,
+      });
+    }
+
+    let publishStarted = false;
+    let accessToken;
+
+    try {
+      accessToken = openInstagramToken(
+        claimed.account,
+        ownerId,
+      );
+
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const url = new URL(
+        `${GRAPH}/${claimed.job.containerId}`,
+      );
+
+      url.searchParams.set(
+        "fields",
+        "status_code",
+      );
+
+      const status = await meta(url, { headers });
+
+      if (status.status_code !== "FINISHED") {
+        await jobRef.update({
+          state: "processing",
+          containerStatus:
+            status.status_code || "UNKNOWN",
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return res.status(409).json({
           success: false,
-          error: "INVALID_REEL_REQUEST",
+          error: "REEL_NOT_READY",
+          containerStatus:
+            status.status_code || "UNKNOWN",
         });
       }
 
-      let url;
+      const body = new URLSearchParams({
+        creation_id: claimed.job.containerId,
+      });
 
-      try {
-        url = new URL(videoUrl);
-      } catch {
-        return res.status(400).json({
-          success: false,
-          error: "INVALID_VIDEO_URL",
-        });
+      publishStarted = true;
+
+      const result = await meta(
+        `${GRAPH}/${claimed.job.instagramUserId}/media_publish`,
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type":
+              "application/x-www-form-urlencoded",
+          },
+          body,
+        },
+      );
+
+      const mediaId = numericId(result.id);
+
+      if (!mediaId) {
+        throw new Error("INVALID_PUBLISHED_MEDIA_ID");
       }
 
-      if (
-        url.origin !== BASE ||
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash ||
-        !/^\/videos\/[a-zA-Z0-9_-]+\.mp4$/.test(
-          url.pathname,
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "USE_EASYAI_VIDEO_URL",
-        });
-      }
+      await jobRef.update({
+        state: "published",
+        mediaId,
+        publishedAt: FieldValue.serverTimestamp(),
+      });
 
+      res.json({
+        success: true,
+        jobId: req.params.jobId,
+        state: "published",
+        mediaId,
+      });
+    } catch (error) {
+      logError(
+        "INSTAGRAM PUBLISH ERROR:",
+        error,
+        [accessToken],
+      );
+
+      await jobRef.update({
+        state: publishStarted
+          ? "publish_needs_check"
+          : "processing",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      res.status(502).json({
+        success: false,
+        jobId: req.params.jobId,
+        error: publishStarted
+          ? "INSTAGRAM_PUBLISH_NEEDS_CHECK"
+          : "INSTAGRAM_STATUS_FAILED",
+      });
+    }
+  });
+
+  app.post(
+    "/api/instagram/reels/:jobId/publish",
+    publishReel,
+  );
+
+  // Internal calls use the same ownership and duplicate checks.
+  // The trusted symbol cannot be supplied through HTTP.
+  async function invoke(
+    handler,
+    ownerId,
+    body = {},
+    params = {},
+  ) {
+    let result;
+    let status = 200;
+    let raised;
+
+    const req = {
+      [trustedOwner]: ownerId,
+      body,
+      params,
+      get: () => "",
+    };
+
+    const res = {
+      set() {
+        return this;
+      },
+
+      status(value) {
+        status = value;
+        return this;
+      },
+
+      json(value) {
+        result = value;
+        return this;
+      },
+    };
+
+    await handler(req, res, (error) => {
+      raised = error;
+    });
+
+    if (raised) {
+      throw raised;
+    }
+
+    if (
+      status >= 400 ||
+      result?.success === false
+    ) {
+      const error = new Error(
+        result?.error || "INSTAGRAM_OPERATION_FAILED",
+      );
+
+      error.code = result?.error;
+      error.status = status;
+      error.result = result;
+
+      throw error;
+    }
+
+    return result;
+  }
+
+  return {
+    async account(ownerId) {
       const account = (
         await connections.doc(ownerId).get()
       ).data();
@@ -1024,429 +1633,44 @@ export function attachInstagram(app, db, { videosDirectory }) {
         expired(account) ||
         account.profileVerified !== true
       ) {
-        return res.status(409).json({
-          success: false,
-          error: "INSTAGRAM_RECONNECT_REQUIRED",
-        });
-      }
-
-      if (!canPublish(account)) {
-        return res.status(403).json({
-          success: false,
-          error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
-        });
-      }
-
-      const jobId = hash(`${ownerId}:${requestId}`);
-      const jobRef = reelJobs.doc(jobId);
-
-      const fingerprint = hash(
-        JSON.stringify([
-          url.href,
-          caption,
-          account.instagramUserId,
-        ]),
-      );
-
-      const existing = await db.runTransaction(
-        async (tx) => {
-          const job = await tx.get(jobRef);
-
-          if (job.exists) return job.data();
-
-          tx.create(jobRef, {
-            ownerId,
-            instagramUserId: account.instagramUserId,
-            fingerprint,
-            state: "creating",
-            createdAt: FieldValue.serverTimestamp(),
-          });
-
-          return null;
-        },
-      );
-
-      if (existing) {
-        if (existing.fingerprint !== fingerprint) {
-          return res.status(409).json({
-            success: false,
-            error: "REQUEST_ID_ALREADY_USED",
-          });
-        }
-
-        return res.json({
-          success: existing.state === "processing",
-          jobId,
-          state: existing.state,
-        });
-      }
-
-      let accessToken;
-
-      try {
-        accessToken = openInstagramToken(
-          account,
-          ownerId,
-        );
-
-        const body = new URLSearchParams({
-          media_type: "REELS",
-          video_url: url.href,
-          caption,
-          share_to_feed: "true",
-        });
-
-        const result = await meta(
-          `${GRAPH}/${account.instagramUserId}/media`,
+        throw Object.assign(
+          new Error("INSTAGRAM_RECONNECT_REQUIRED"),
           {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              "Content-Type":
-                "application/x-www-form-urlencoded",
-            },
-            body,
+            code: "INSTAGRAM_RECONNECT_REQUIRED",
           },
         );
-
-        const containerId = numericId(result.id);
-
-        if (!containerId) {
-          throw new Error("INVALID_CONTAINER_ID");
-        }
-
-        await jobRef.update({
-          containerId,
-          state: "processing",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        res.json({
-          success: true,
-          jobId,
-          state: "processing",
-        });
-      } catch (error) {
-        logError(
-          "INSTAGRAM PREPARE ERROR:",
-          error,
-          [accessToken],
-        );
-
-        await jobRef.update({
-          state: "needs_check",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        res.status(502).json({
-          success: false,
-          jobId,
-          error: "INSTAGRAM_PREPARE_NEEDS_CHECK",
-        });
-      }
-    }),
-  );
-
-  app.get(
-    "/api/instagram/reels/:jobId/status",
-    wrap(async (req, res) => {
-      res.set("Cache-Control", "no-store");
-
-      const ownerId = await owner(req, res);
-      if (!ownerId) return;
-
-      if (!isKey(req.params.jobId)) {
-        return res.status(400).json({
-          success: false,
-          error: "INVALID_JOB_ID",
-        });
       }
 
-      const jobRef = reelJobs.doc(req.params.jobId);
-      const job = (await jobRef.get()).data();
+      return {
+        id: account.instagramUserId,
+        username: account.username,
+        canPublish: canPublish(account),
+      };
+    },
 
-      if (!job || job.ownerId !== ownerId) {
-        return res.status(404).json({
-          success: false,
-          error: "REEL_NOT_FOUND",
-        });
-      }
+    prepare: (ownerId, body) =>
+      invoke(prepareReel, ownerId, body),
 
-      if (!job.containerId || job.state === "published") {
-        return res.json({
-          success: true,
-          jobId: req.params.jobId,
-          state: job.state,
-          mediaId: job.mediaId || null,
-        });
-      }
+    status: (ownerId, jobId) =>
+      invoke(
+        reelStatus,
+        ownerId,
+        {},
+        { jobId },
+      ),
 
-      const account = (
-        await connections.doc(ownerId).get()
-      ).data();
+    publish: (ownerId, jobId) =>
+      invoke(
+        publishReel,
+        ownerId,
+        { confirm: true },
+        { jobId },
+      ),
 
-      if (
-        expired(account) ||
-        account.instagramUserId !== job.instagramUserId
-      ) {
-        return res.status(409).json({
-          success: false,
-          error: "INSTAGRAM_RECONNECT_REQUIRED",
-        });
-      }
-
-      let accessToken;
-
-      try {
-        accessToken = openInstagramToken(
-          account,
-          ownerId,
-        );
-
-        const url = new URL(
-          `${GRAPH}/${job.containerId}`,
-        );
-
-        url.searchParams.set("fields", "status_code");
-
-        const result = await meta(url, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-
-        if (
-          ![
-            "IN_PROGRESS",
-            "FINISHED",
-            "ERROR",
-            "EXPIRED",
-            "PUBLISHED",
-          ].includes(result.status_code)
-        ) {
-          throw new Error("INVALID_CONTAINER_STATUS");
-        }
-
-        await jobRef.update({
-          containerStatus: result.status_code,
-          checkedAt: FieldValue.serverTimestamp(),
-        });
-
-        res.json({
-          success: true,
-          jobId: req.params.jobId,
-          state: job.state,
-          containerStatus: result.status_code,
-          readyToPublish:
-            job.state === "processing" &&
-            result.status_code === "FINISHED",
-        });
-      } catch (error) {
-        logError(
-          "INSTAGRAM STATUS ERROR:",
-          error,
-          [accessToken],
-        );
-
-        res.status(502).json({
-          success: false,
-          error: "INSTAGRAM_STATUS_FAILED",
-        });
-      }
-    }),
-  );
-
-  app.post(
-    "/api/instagram/reels/:jobId/publish",
-    wrap(async (req, res) => {
-      res.set("Cache-Control", "no-store");
-
-      const ownerId = await owner(req, res);
-      if (!ownerId) return;
-
-      if (
-        !isKey(req.params.jobId) ||
-        req.body?.confirm !== true
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: "PUBLISH_CONFIRMATION_REQUIRED",
-        });
-      }
-
-      const jobRef = reelJobs.doc(req.params.jobId);
-
-      const claimed = await db.runTransaction(
-        async (tx) => {
-          const job = (
-            await tx.get(jobRef)
-          ).data();
-
-          const account = (
-            await tx.get(connections.doc(ownerId))
-          ).data();
-
-          if (!job || job.ownerId !== ownerId) {
-            return {
-              error: "REEL_NOT_FOUND",
-              status: 404,
-            };
-          }
-
-          if (job.state === "published") {
-            return {
-              published: true,
-              mediaId: job.mediaId,
-            };
-          }
-
-          if (
-            expired(account) ||
-            account.instagramUserId !== job.instagramUserId
-          ) {
-            return {
-              error: "INSTAGRAM_RECONNECT_REQUIRED",
-              status: 409,
-            };
-          }
-
-          if (!canPublish(account)) {
-            return {
-              error: "INSTAGRAM_PUBLISH_PERMISSION_REQUIRED",
-              status: 403,
-            };
-          }
-
-          if (
-            !job.containerId ||
-            job.state !== "processing"
-          ) {
-            return {
-              error: "REEL_NOT_READY_OR_ALREADY_SUBMITTED",
-              status: 409,
-            };
-          }
-
-          tx.update(jobRef, {
-            state: "publishing",
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          return { job, account };
-        },
-      );
-
-      if (claimed.error) {
-        return res.status(claimed.status).json({
-          success: false,
-          error: claimed.error,
-        });
-      }
-
-      if (claimed.published) {
-        return res.json({
-          success: true,
-          state: "published",
-          mediaId: claimed.mediaId,
-        });
-      }
-
-      let publishStarted = false;
-      let accessToken;
-
-      try {
-        accessToken = openInstagramToken(
-          claimed.account,
-          ownerId,
-        );
-
-        const headers = {
-          Authorization: `Bearer ${accessToken}`,
-        };
-
-        const url = new URL(
-          `${GRAPH}/${claimed.job.containerId}`,
-        );
-
-        url.searchParams.set("fields", "status_code");
-
-        const status = await meta(url, { headers });
-
-        if (status.status_code !== "FINISHED") {
-          await jobRef.update({
-            state: "processing",
-            containerStatus:
-              status.status_code || "UNKNOWN",
-            updatedAt: FieldValue.serverTimestamp(),
-          });
-
-          return res.status(409).json({
-            success: false,
-            error: "REEL_NOT_READY",
-            containerStatus:
-              status.status_code || "UNKNOWN",
-          });
-        }
-
-        const body = new URLSearchParams({
-          creation_id: claimed.job.containerId,
-        });
-
-        publishStarted = true;
-
-        const result = await meta(
-          `${GRAPH}/${claimed.job.instagramUserId}/media_publish`,
-          {
-            method: "POST",
-            headers: {
-              ...headers,
-              "Content-Type":
-                "application/x-www-form-urlencoded",
-            },
-            body,
-          },
-        );
-
-        const mediaId = numericId(result.id);
-
-        if (!mediaId) {
-          throw new Error("INVALID_PUBLISHED_MEDIA_ID");
-        }
-
-        await jobRef.update({
-          state: "published",
-          mediaId,
-          publishedAt: FieldValue.serverTimestamp(),
-        });
-
-        res.json({
-          success: true,
-          jobId: req.params.jobId,
-          state: "published",
-          mediaId,
-        });
-      } catch (error) {
-        logError(
-          "INSTAGRAM PUBLISH ERROR:",
-          error,
-          [accessToken],
-        );
-
-        await jobRef.update({
-          state: publishStarted
-            ? "publish_needs_check"
-            : "processing",
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        res.status(502).json({
-          success: false,
-          jobId: req.params.jobId,
-          error: publishStarted
-            ? "INSTAGRAM_PUBLISH_NEEDS_CHECK"
-            : "INSTAGRAM_STATUS_FAILED",
-        });
-      }
-    }),
-  );
+    business: (ownerId, enabled) =>
+      businessService.setAutoReply(
+        ownerId,
+        enabled,
+      ),
+  };
 }
