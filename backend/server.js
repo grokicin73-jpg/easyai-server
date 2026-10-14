@@ -7,27 +7,45 @@ import { fileURLToPath } from "url";
 import { mkdir, writeFile, readFile } from "fs/promises";
 import multer from "multer";
 import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import {
+  getFirestore,
+  FieldValue,
+} from "firebase-admin/firestore";
 import { google } from "googleapis";
+
 import { attachJarvis } from "./jarvis_server.js";
 import { attachInstagram } from "./instagram_server.js";
-import { attachInstagramWebhook } from "./instagram_webhook.js";
+import {
+  attachInstagramWebhook,
+} from "./instagram_webhook.js";
+
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
 const PORT = process.env.PORT || 3002;
 
-
-
 const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_API_KEY;
+
+const PUBLIC_BASE_URL = (
+  process.env.PUBLIC_BASE_URL ||
+  "https://easyai-server.onrender.com"
+).replace(/\/+$/, "");
 
 const firebaseCredentials = process.env.FIREBASE_CREDENTIALS
   ? JSON.parse(process.env.FIREBASE_CREDENTIALS)
   : JSON.parse(
       await readFile(
-        new URL("./easyai-bc97f-4e135dcd7bac.json", import.meta.url),
-        "utf8"
-      )
+        new URL(
+          "./easyai-bc97f-4e135dcd7bac.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
     );
 
 initializeApp({
@@ -35,57 +53,244 @@ initializeApp({
 });
 
 const db = getFirestore();
+
 const vertexAuth = new google.auth.GoogleAuth({
   credentials: firebaseCredentials,
-  scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  scopes: [
+    "https://www.googleapis.com/auth/cloud-platform",
+  ],
 });
-const androidPublisher = google.androidpublisher("v3");
+
+const androidPublisher =
+  google.androidpublisher("v3");
 
 const googleAuth = new google.auth.GoogleAuth({
   credentials: firebaseCredentials,
-  scopes: ["https://www.googleapis.com/auth/androidpublisher"],
+  scopes: [
+    "https://www.googleapis.com/auth/androidpublisher",
+  ],
 });
+
 const FREE_VIDEOS = 1;
 const VIDEO_CREDIT_COST = 6;
-const REVIEW_ACCESS_CODE =
-  (process.env.REVIEW_ACCESS_CODE || "").trim();
 
+const REVIEW_ACCESS_CODE = (
+  process.env.REVIEW_ACCESS_CODE || ""
+).trim();
+
+function logError(label, error) {
+  let message = String(
+    error?.message || error || "Unknown error",
+  );
+
+  if (GEMINI_API_KEY) {
+    message = message
+      .split(GEMINI_API_KEY)
+      .join("[HIDDEN]");
+  }
+
+  console.error(label, message);
+}
+
+function requestError(status, code) {
+  const error = new Error(code);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+function readDeviceId(value) {
+  const deviceId =
+    typeof value === "string"
+      ? value.trim().toLowerCase()
+      : "";
+
+  if (!/^[a-f0-9]{16}$/.test(deviceId)) {
+    throw requestError(400, "INVALID_DEVICE_ID");
+  }
+
+  return deviceId;
+}
+
+function assertDeviceSession(req, usage) {
+  if (!usage?.jarvisCredentialHash) return;
+
+  const header = req.headers.authorization;
+
+  const credential =
+    typeof header === "string" &&
+    header.startsWith("Bearer ")
+      ? header.slice(7)
+      : "";
+
+  const hash = crypto
+    .createHash("sha256")
+    .update(credential)
+    .digest("hex");
+
+  if (
+    !/^[a-f0-9]{64}$/.test(credential) ||
+    hash !== usage.jarvisCredentialHash
+  ) {
+    throw requestError(
+      403,
+      "DEVICE_SESSION_MISMATCH",
+    );
+  }
+}
+
+// Mavjud foydalanuvchi ma’lumotlarini o‘zgartirmasdan olish.
 async function getUserUsage(userId) {
   const userRef = db.collection("users").doc(userId);
-  const userDoc = await userRef.get();
-  console.log("FIRESTORE RAW USER:", userId, userDoc.exists, userDoc.data());
 
-  if (!userDoc.exists) {
-    const newUser = {
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+
+    if (snapshot.exists) {
+      return snapshot.data();
+    }
+
+    const user = {
       freeVideosRemaining: FREE_VIDEOS,
       credits: 0,
       createdAt: FieldValue.serverTimestamp(),
     };
 
-    await userRef.set(newUser);
-    return newUser;
-  }
-
-  return userDoc.data();
+    transaction.set(userRef, user);
+    return user;
+  });
 }
+
+// Video uchun bepul imkoniyat yoki 6 kreditni rezervlash.
+async function reserveVideo(
+  req,
+  deviceId,
+  videoId,
+) {
+  const userRef = db.collection("users").doc(deviceId);
+
+  const reservationRef = db
+    .collection("videoCreditReservations")
+    .doc(videoId);
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const usage = snapshot.data() || {};
+
+    assertDeviceSession(req, usage);
+
+    const free =
+      Number.isSafeInteger(usage.freeVideosRemaining) &&
+      usage.freeVideosRemaining > 0;
+
+    const credits = Number.isSafeInteger(usage.credits)
+      ? usage.credits
+      : 0;
+
+    if (!free && credits < VIDEO_CREDIT_COST) {
+      throw requestError(403, "FREE_LIMIT_REACHED");
+    }
+
+    const field = free
+      ? "freeVideosRemaining"
+      : "credits";
+
+    const amount = free ? 1 : VIDEO_CREDIT_COST;
+
+    transaction.update(userRef, {
+      [field]: FieldValue.increment(-amount),
+    });
+
+    transaction.set(reservationRef, {
+      deviceId,
+      status: "reserved",
+      refundField: field,
+      refundAmount: amount,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return reservationRef;
+}
+
+async function completeVideoReservation(
+  ref,
+  videoUrl,
+) {
+  if (!ref) return;
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+
+    if (snapshot.data()?.status !== "reserved") {
+      throw requestError(
+        409,
+        "VIDEO_RESERVATION_CONFLICT",
+      );
+    }
+
+    transaction.update(ref, {
+      status: "completed",
+      videoUrl,
+      completedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+// Xatodagi video rezervini faqat bir marta qaytarish.
+async function refundVideoReservation(ref) {
+  if (!ref) return;
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const saved = snapshot.data();
+
+    if (saved?.status !== "reserved") return;
+
+    transaction.update(
+      db.collection("users").doc(saved.deviceId),
+      {
+        [saved.refundField]: FieldValue.increment(
+          saved.refundAmount,
+        ),
+      },
+    );
+
+    transaction.update(ref, {
+      status: "refunded",
+      refundedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const videosDirectory = path.join(__dirname, "generated-videos");
+const videosDirectory = path.join(
+  __dirname,
+  "generated-videos",
+);
 
-await mkdir(videosDirectory, { recursive: true });
+await mkdir(videosDirectory, {
+  recursive: true,
+});
 
 app.use(cors());
+
+// Instagram webhook tekshiruvi.
 app.get("/instagram/webhook", (req, res) => {
-  const expectedToken =
-    (process.env.INSTAGRAM_VERIFY_TOKEN || "").trim();
+  const expectedToken = (
+    process.env.INSTAGRAM_VERIFY_TOKEN || ""
+  ).trim();
 
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (!expectedToken) {
-    return res.status(503).send("Webhook token sozlanmagan.");
+    return res
+      .status(503)
+      .send("Webhook token sozlanmagan.");
   }
 
   if (
@@ -95,20 +300,30 @@ app.get("/instagram/webhook", (req, res) => {
     typeof challenge === "string" &&
     challenge.length > 0
   ) {
-    return res.status(200).type("text/plain").send(challenge);
+    return res
+      .status(200)
+      .type("text/plain")
+      .send(challenge);
   }
 
   return res.sendStatus(403);
 });
-app.use(express.json({
-  limit: "2mb",
-  verify: (req, res, buffer) => {
-    if (req.path === "/instagram/webhook") {
-      req.instagramRawBody = Buffer.from(buffer);
-    }
-  },
-}));
-attachInstagram(app, db, { videosDirectory });
+
+app.use(
+  express.json({
+    limit: "2mb",
+    verify: (req, res, buffer) => {
+      if (req.path === "/instagram/webhook") {
+        req.instagramRawBody = Buffer.from(buffer);
+      }
+    },
+  }),
+);
+
+attachInstagram(app, db, {
+  videosDirectory,
+});
+
 attachInstagramWebhook(app, db);
 
 app.use(
@@ -120,110 +335,46 @@ app.use(
   }),
 );
 
-
-
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function parseJsonResponse(response) {
-  const responseText = await response.text();
-
-  let data;
-
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(
-      `JSON bo'lmagan javob qaytardi. HTTP ${response.status}`,
-    );
-  }
-
-  return data;
-}
-
-
-
-  
-
-
-
-      
-        
-      
-    
-
-    
-
-    
-      
-        
-          
-      
-    
-
-    
-    
-
-    
-      
-    
-
-
-      
-        
-      
-
-      
-    
-
-  
-      
-        
-      
-    
-
-    
-      
-        
-      
-    
-
-  
-  
-
-  
-    
-  
-
-
-async function saveVideo(remoteVideoUrl, videoId) {
+async function saveVideo(
+  remoteVideoUrl,
+  videoId,
+) {
   let videoBuffer;
 
   if (remoteVideoUrl.startsWith("data:")) {
     const match = remoteVideoUrl.match(
-      /^data:video\/[^;,]+;base64,([\s\S]+)$/
+      /^data:video\/[^;,]+;base64,([\s\S]+)$/,
     );
 
     if (!match) {
-      throw new Error("Video base64 formati noto'g'ri.");
-    }
-
-    videoBuffer = Buffer.from(match[1], "base64");
-  } else {
-    const response = await fetch(remoteVideoUrl, {
-      headers: {
-        "x-goog-api-key": GEMINI_API_KEY,
-      },
-    });
-
-    if (!response.ok) {
       throw new Error(
-        `Tayyor videoni yuklab olishda xato. HTTP ${response.status}`
+        "Video base64 formati noto'g'ri.",
       );
     }
 
-    videoBuffer = Buffer.from(await response.arrayBuffer());
+    videoBuffer = Buffer.from(
+      match[1],
+      "base64",
+    );
+  } else {
+    const response = await fetch(
+      remoteVideoUrl,
+      {
+        headers: {
+          "x-goog-api-key": GEMINI_API_KEY,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Tayyor videoni yuklab olishda xato. HTTP ${response.status}`,
+      );
+    }
+
+    videoBuffer = Buffer.from(
+      await response.arrayBuffer(),
+    );
   }
 
   if (videoBuffer.length === 0) {
@@ -231,27 +382,45 @@ async function saveVideo(remoteVideoUrl, videoId) {
   }
 
   const fileName = `${videoId}.mp4`;
-  const filePath = path.join(videosDirectory, fileName);
 
-  await writeFile(filePath, videoBuffer);
+  await writeFile(
+    path.join(videosDirectory, fileName),
+    videoBuffer,
+  );
+
   return fileName;
 }
-async function fetchWithRetry(url, options = {}, retries = 3) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
+
+async function fetchWithRetry(
+  url,
+  options = {},
+  retries = 3,
+) {
+  for (
+    let attempt = 1;
+    attempt <= retries;
+    attempt++
+  ) {
     try {
       const response = await fetch(url, options);
 
       if (
         response.ok ||
-        ![429, 500, 502, 503, 504].includes(response.status)
+        ![429, 500, 502, 503, 504].includes(
+          response.status,
+        )
       ) {
         return response;
       }
 
-      console.log(`VEO temporary error ${response.status}. Retry ${attempt}/${retries}`);
-      if (response.status === 429) console.log("VEO 429 BODY:", await response.clone().text());
+      console.log(
+        `VEO temporary error ${response.status}. Retry ${attempt}/${retries}`,
+      );
     } catch (error) {
-      console.log(`VEO network error. Retry ${attempt}/${retries}:`, error.message);
+      logError(
+        `VEO network error. Retry ${attempt}/${retries}:`,
+        error,
+      );
 
       if (attempt === retries) {
         throw error;
@@ -259,150 +428,190 @@ async function fetchWithRetry(url, options = {}, retries = 3) {
     }
 
     if (attempt < retries) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, attempt * 65000)
-      );
+      await new Promise((resolve) => {
+        setTimeout(resolve, attempt * 65000);
+      });
     }
   }
 
-  throw new Error("Veo request failed after retries");
+  throw new Error(
+    "Veo request failed after retries",
+  );
 }
-async function createVeoLiteVideo(prompt, imageFile = null, attempt = 1) {
+
+async function createVeoLiteVideo(
+  prompt,
+  imageFile = null,
+  attempt = 1,
+) {
   const model = "veo-3.1-lite-generate-001";
-const projectId = "easyai-bc97f";
-const location = "us-central1";
-const url =
-  `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:predictLongRunning`;
+  const projectId = "easyai-bc97f";
+  const location = "us-central1";
+
+  const modelUrl =
+    `https://${location}-aiplatform.googleapis.com/v1/projects/` +
+    `${projectId}/locations/${location}/publishers/google/models/${model}`;
 
   const instance = { prompt };
 
   if (imageFile) {
-  instance.image = {
-    bytesBase64Encoded: imageFile.buffer.toString("base64"),
-    mimeType: imageFile.mimetype || "image/jpeg",
-  };
-}
-  
- const authClient = await vertexAuth.getClient();
-const accessToken = await authClient.getAccessToken();
-console.log("TOKEN BOR:", !!(accessToken.token || accessToken)); 
-console.log("VEO REQUEST START:", new Date().toISOString(), "IMAGE:", !!imageFile);
-  const response = await fetchWithRetry(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken.token || accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      instances: [instance],
-      parameters: {
-        
-        resolution: "720p",
-        aspectRatio: imageFile ? "9:16" : "16:9",
-        durationSeconds: 8,
+    instance.image = {
+      bytesBase64Encoded:
+        imageFile.buffer.toString("base64"),
+      mimeType:
+        imageFile.mimetype || "image/jpeg",
+    };
+  }
+
+  const authClient =
+    await vertexAuth.getClient();
+
+  const accessToken =
+    await authClient.getAccessToken();
+
+  const token =
+    accessToken.token || accessToken;
+
+  console.log(
+    "VEO REQUEST START:",
+    new Date().toISOString(),
+    "IMAGE:",
+    !!imageFile,
+  );
+
+  const response = await fetchWithRetry(
+    `${modelUrl}:predictLongRunning`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
-    }),
-  });
+      body: JSON.stringify({
+        instances: [instance],
+        parameters: {
+          resolution: "720p",
+          aspectRatio: imageFile ? "9:16" : "16:9",
+          durationSeconds: 8,
+        },
+      }),
+    },
+  );
 
   const data = await response.json();
-  console.log("VEO REQUEST RESPONSE:", new Date().toISOString(), "IMAGE:", !!imageFile);
 
   if (!response.ok) {
-    console.error("Veo start error:", data);
-    throw new Error("Veo video creation failed");
+    throw new Error(
+      `Veo video creation failed. HTTP ${response.status}`,
+    );
   }
 
   const operationName = data?.name;
 
   if (!operationName) {
-    console.error("Veo operation missing:", data);
-    throw new Error("Veo operation name missing");
+    throw new Error(
+      "Veo operation name missing",
+    );
   }
 
   for (let i = 0; i < 120; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10000);
+    });
 
-    const statusResponse = await fetchWithRetry(
-  `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:fetchPredictOperation`,
-  {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${accessToken.token || accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      operationName: operationName,
-    }),
-  }
-);
+    const statusResponse =
+      await fetchWithRetry(
+        `${modelUrl}:fetchPredictOperation`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            operationName,
+          }),
+        },
+      );
 
-    const statusData = await statusResponse.json();
+    const statusData =
+      await statusResponse.json();
+
     console.log("VEO STATUS:", {
-  done: statusData?.done === true,
-  error: statusData?.error || null,
-});
+      done: statusData?.done === true,
+      errorCode:
+        statusData?.error?.code || null,
+    });
 
     if (!statusResponse.ok) {
-      console.error("Veo status error:", statusData);
-      throw new Error("Veo status check failed");
+      throw new Error(
+        "Veo status check failed",
+      );
     }
 
     if (statusData?.done === true) {
-  const video =
-  statusData?.response?.generateVideoResponse
-    ?.generatedSamples?.[0]?.video ||
-  statusData?.response?.videos?.[0];
+      const video =
+        statusData?.response
+          ?.generateVideoResponse
+          ?.generatedSamples?.[0]?.video ||
+        statusData?.response?.videos?.[0];
 
-  const videoUrl = video?.uri;
-  
-    const videoBase64 =
-  video?.bytesBase64Encoded ||
-  video?.encodedVideo ||
-  video?.videoBytes ||
-  video?.inlineData?.data ||
-  video?.data ||
-  Object.entries(video || {}).find(
-    ([key, value]) =>
-      key !== "mimeType" &&
-      typeof value === "string" &&
-      value.length > 1000,
-  )?.[1];
+      const videoUrl = video?.uri;
 
-  if (videoUrl) {
-    return videoUrl;
-  }
+      const videoBase64 =
+        video?.bytesBase64Encoded ||
+        video?.encodedVideo ||
+        video?.videoBytes ||
+        video?.inlineData?.data ||
+        video?.data ||
+        Object.entries(video || {}).find(
+          ([key, value]) =>
+            key !== "mimeType" &&
+            typeof value === "string" &&
+            value.length > 1000,
+        )?.[1];
 
-  if (videoBase64) {
-    const mimeType = video?.mimeType || "video/mp4";
-    return `data:${mimeType};base64,${videoBase64}`;
-  }
+      if (videoUrl) {
+        return videoUrl;
+      }
 
-  const errorCode = statusData?.error?.code;
+      if (videoBase64) {
+        return (
+          `data:${video?.mimeType || "video/mp4"};base64,` +
+          videoBase64
+        );
+      }
 
-  if (errorCode === 13 && attempt < 3) {
-    console.warn(
-      `VEO internal server error. Automatic retry ${attempt + 1}/3 in 10 seconds...`,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-    return createVeoLiteVideo(prompt, imageFile, attempt + 1);
-  }
+      if (
+        statusData?.error?.code === 13 &&
+        attempt < 3
+      ) {
+        console.warn(
+          `VEO internal error. Retry ${attempt + 1}/3 in 10 seconds.`,
+        );
 
-  console.error("Veo video data missing:", {
-  error: statusData?.error || null,
-  responseKeys: Object.keys(statusData?.response || {}),
-  filteredCount: statusData?.response?.raiMediaFilteredCount || 0,
-  filteredReasons: statusData?.response?.raiMediaFilteredReasons || [],
-});
-  throw new Error("Veo video data missing");
-}
+        await new Promise((resolve) => {
+          setTimeout(resolve, 10000);
+        });
+
+        return createVeoLiteVideo(
+          prompt,
+          imageFile,
+          attempt + 1,
+        );
+      }
+
+      throw new Error(
+        "Veo video data missing",
+      );
+    }
   }
 
   throw new Error("Veo video timed out");
 }
+
 app.get("/", (req, res) => {
-  res.json({
-    success: true,
-  });
+  res.json({ success: true });
 });
 
 app.get("/health", (req, res) => {
@@ -411,8 +620,406 @@ app.get("/health", (req, res) => {
     status: "healthy",
   });
 });
+
 app.get("/privacy", (req, res) => {
-  res.type("html").send(`<!DOCTYPE html>
+  res.type("html").send(PRIVACY_HTML);
+});
+
+// AI kontenti haqida shikoyat.
+app.post(
+  "/api/content-reports",
+  async (req, res) => {
+    try {
+      const body = req.body;
+
+      if (
+        !body ||
+        typeof body !== "object" ||
+        Array.isArray(body)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONTENT_REPORT",
+        });
+      }
+
+      const allowedTypes = new Set([
+        "video",
+        "chat",
+        "voice",
+      ]);
+
+      const allowedReasons = new Set([
+        "sexual",
+        "violence",
+        "hate",
+        "child_safety",
+        "misleading",
+        "other",
+      ]);
+
+      const allowedLanguages = new Set([
+        "English",
+        "Кыргызча",
+        "Русский",
+        "Türkçe",
+      ]);
+
+      if (
+        !allowedTypes.has(body.contentType) ||
+        !allowedReasons.has(body.reason) ||
+        !allowedLanguages.has(body.language)
+      ) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONTENT_REPORT",
+        });
+      }
+
+      const limits = {
+        details: 2000,
+        content: 20000,
+        prompt: 20000,
+        model: 100,
+        videoUrl: 4096,
+      };
+
+      const fields = {};
+
+      for (
+        const [name, limit] of
+        Object.entries(limits)
+      ) {
+        const value = body[name] ?? "";
+
+        if (
+          typeof value !== "string" ||
+          value.length > limit
+        ) {
+          return res.status(400).json({
+            success: false,
+            code: "INVALID_CONTENT_REPORT",
+          });
+        }
+
+        fields[name] = value.trim();
+      }
+
+      const reportRef = db
+        .collection("contentReports")
+        .doc();
+
+      await reportRef.set({
+        contentType: body.contentType,
+        reason: body.reason,
+        language: body.language,
+        ...fields,
+        status: "new",
+        createdAt:
+          FieldValue.serverTimestamp(),
+      });
+
+      return res.status(201).json({
+        success: true,
+        reportId: reportRef.id,
+      });
+    } catch (error) {
+      logError(
+        "CONTENT REPORT SAVE FAILED:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        code: "CONTENT_REPORT_FAILED",
+      });
+    }
+  },
+);
+
+// Video yaratish.
+app.post(
+  "/api/generate-video",
+  upload.single("image"),
+  async (req, res) => {
+    let reservation;
+
+    try {
+      const prompt =
+        typeof req.body?.prompt === "string"
+          ? req.body.prompt.trim()
+          : "";
+
+      if (!prompt) {
+        return res.status(400).json({
+          success: false,
+          error: "Prompt yozilmagan.",
+        });
+      }
+
+      const deviceId =
+        readDeviceId(req.body?.deviceId);
+
+      const reviewCode =
+        typeof req.body?.reviewCode === "string"
+          ? req.body.reviewCode.trim()
+          : "";
+
+      const isReviewAccess =
+        REVIEW_ACCESS_CODE.length > 0 &&
+        reviewCode === REVIEW_ACCESS_CODE;
+
+      const usage =
+        await getUserUsage(deviceId);
+
+      assertDeviceSession(req, usage);
+
+      const videoId =
+        `veo-${Date.now()}-` +
+        crypto.randomBytes(6).toString("hex");
+
+      if (!isReviewAccess) {
+        reservation = await reserveVideo(
+          req,
+          deviceId,
+          videoId,
+        );
+      }
+
+      const remoteVideoUrl =
+        await createVeoLiteVideo(
+          prompt,
+          req.file || null,
+        );
+
+      const fileName = await saveVideo(
+        remoteVideoUrl,
+        videoId,
+      );
+
+      const videoUrl =
+        `${PUBLIC_BASE_URL}/videos/${fileName}`;
+
+      await completeVideoReservation(
+        reservation,
+        videoUrl,
+      );
+
+      return res.json({
+        success: true,
+        videoUrl,
+        video_url: videoUrl,
+        url: videoUrl,
+        videoId,
+      });
+    } catch (error) {
+      try {
+        await refundVideoReservation(
+          reservation,
+        );
+      } catch (refundError) {
+        logError(
+          "VIDEO REFUND REQUIRES REVIEW:",
+          refundError,
+        );
+      }
+
+      if (
+        [
+          "FREE_LIMIT_REACHED",
+          "DEVICE_SESSION_MISMATCH",
+          "INVALID_DEVICE_ID",
+        ].includes(error?.code)
+      ) {
+        return res
+          .status(error.status)
+          .json({
+            success: false,
+            code: error.code,
+          });
+      }
+
+      logError(
+        "GENERATE VIDEO ERROR:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        code: "VIDEO_GENERATION_FAILED",
+        error: "Video yaratishda xato.",
+      });
+    }
+  },
+);
+
+// Google Play xaridini tekshirish.
+app.post(
+  "/api/verify-purchase",
+  async (req, res) => {
+    try {
+      const body = req.body || {};
+
+      const purchaseToken =
+        typeof body.purchaseToken === "string"
+          ? body.purchaseToken.trim()
+          : "";
+
+      const productId = body.productId;
+      const deviceId =
+        readDeviceId(body.deviceId);
+
+      if (
+        !purchaseToken ||
+        purchaseToken.includes("/") ||
+        purchaseToken === "." ||
+        purchaseToken === ".." ||
+        Buffer.byteLength(
+          purchaseToken,
+          "utf8",
+        ) > 1500 ||
+        productId !== "credits_100"
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Xarid ma'lumotlari noto'g'ri.",
+        });
+      }
+
+      const userRef = db
+        .collection("users")
+        .doc(deviceId);
+
+      assertDeviceSession(
+        req,
+        (await userRef.get()).data(),
+      );
+
+      const authClient =
+        await googleAuth.getClient();
+
+      const result =
+        await androidPublisher.purchases.products.get({
+          auth: authClient,
+          packageName: "com.easyai.video",
+          productId,
+          token: purchaseToken,
+        });
+
+      if (result.data.purchaseState !== 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Google Play xaridi tasdiqlanmadi.",
+        });
+      }
+
+      const purchaseRef = db
+        .collection("usedPurchases")
+        .doc(purchaseToken);
+
+      const credited =
+        await db.runTransaction(
+          async (transaction) => {
+            const purchaseDoc =
+              await transaction.get(
+                purchaseRef,
+              );
+
+            const ownerDoc =
+              await transaction.get(
+                userRef,
+              );
+
+            assertDeviceSession(
+              req,
+              ownerDoc.data(),
+            );
+
+            if (purchaseDoc.exists) {
+              const previous =
+                purchaseDoc.data();
+
+              if (
+                previous.deviceId !== deviceId ||
+                previous.productId !== productId
+              ) {
+                throw requestError(
+                  409,
+                  "PURCHASE_ALREADY_LINKED",
+                );
+              }
+
+              return false;
+            }
+
+            transaction.set(
+              userRef,
+              {
+                ...(ownerDoc.exists
+                  ? {}
+                  : {
+                      freeVideosRemaining:
+                        FREE_VIDEOS,
+                      createdAt:
+                        FieldValue.serverTimestamp(),
+                    }),
+                credits:
+                  FieldValue.increment(100),
+              },
+              { merge: true },
+            );
+
+            transaction.set(
+              purchaseRef,
+              {
+                deviceId,
+                productId,
+                usedAt:
+                  FieldValue.serverTimestamp(),
+              },
+            );
+
+            return true;
+          },
+        );
+
+      return res.json({
+        success: true,
+        credits: credited ? 100 : 0,
+        alreadyCredited: !credited,
+      });
+    } catch (error) {
+      if (
+        [
+          "DEVICE_SESSION_MISMATCH",
+          "INVALID_DEVICE_ID",
+          "PURCHASE_ALREADY_LINKED",
+        ].includes(error?.code)
+      ) {
+        return res
+          .status(error.status)
+          .json({
+            success: false,
+            code: error.code,
+          });
+      }
+
+      logError(
+        "Google Play verify error:",
+        error,
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Xaridni tekshirishda xato.",
+      });
+    }
+  },
+);
+
+// Maxfiylik siyosati — 4 tilda.
+const PRIVACY_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -451,7 +1058,7 @@ app.get("/privacy", (req, res) => {
 
   <section id="en" lang="en">
     <h2>Privacy Policy</h2>
-    <p>Updated: 12 October 2026.
+    <p>Updated: 14 October 2026.
     Contact: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
 
     <h3>Data and purposes</h3>
@@ -462,6 +1069,14 @@ app.get("/privacy", (req, res) => {
     and purchase verification data are used to provide free allowances,
     manage credits, verify purchases, and prevent misuse.</p>
 
+    <p>For Jarvis, a random app session credential is stored on the device
+    and its hash is stored on the server. Jarvis usage and billing records
+    include request identifiers, request hashes, generated chat replies,
+    free allowances, credit reservations, refunds, and live-session minute
+    records. These records are stored in Firebase Firestore to manage
+    access, billing, and duplicate requests. This billing storage does not
+    attach microphone audio. No automatic deletion period is configured.</p>
+
     <p>If you connect Instagram, we process account identifiers,
     profile information, granted permissions, encrypted access tokens,
     connection dates, publishing records, and product catalogue data.
@@ -470,21 +1085,21 @@ app.get("/privacy", (req, res) => {
     This supports the Instagram features you use.
     Instagram login takes place through Instagram; do not send your
     Instagram password to EasyAI support.</p>
-    <h3>AI content reports</h3>
-    <p>When you submit an in-app content report, EasyAI receives
-    your selected reason, optional comments, app language,
-    and the relevant content available on that screen. This may
-    include AI response text, conversation transcripts, prompts,
-    captions, model names, and a generated video URL.
-    This reporting feature does not attach microphone audio.</p>
 
-    <p>Reports are stored in Firebase Firestore with a report
-    identifier, submission time, and review status. They are used
-    to investigate reported content and improve content safety.
-    Reports remain stored until manually deleted; no automatic
-    deletion period is currently configured.
-    To request deletion, contact grokicin73@gmail.com and provide
-    the submission time and enough information to identify your
+    <h3>AI content reports</h3>
+    <p>When you submit an in-app content report, EasyAI receives your
+    selected reason, optional comments, app language, and the relevant
+    content available on that screen. This may include AI response text,
+    conversation transcripts, prompts, captions, model names, and a
+    generated video URL. This reporting feature does not attach
+    microphone audio.</p>
+
+    <p>Reports are stored in Firebase Firestore with a report identifier,
+    submission time, and review status. They are used to investigate
+    reported content and improve content safety. Reports remain stored
+    until manually deleted; no automatic deletion period is currently
+    configured. To request deletion, contact grokicin73@gmail.com and
+    provide the submission time and enough information to identify your
     report. Do not include passwords or access tokens.</p>
 
     <h3>Service providers and access</h3>
@@ -516,7 +1131,7 @@ app.get("/privacy", (req, res) => {
 
   <section id="ky" lang="ky">
     <h2>Купуялык саясаты</h2>
-    <p>Жаңыртылган күнү: 2026-жылдын 12-октябры.
+    <p>Жаңыртылган күнү: 2026-жылдын 14-октябры.
     Байланыш: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
 
     <h3>Маалыматтар жана максаттар</h3>
@@ -528,6 +1143,15 @@ app.get("/privacy", (req, res) => {
     мүмкүнчүлүктөрдү, кредиттерди жана төлөмдөрдү башкаруу,
     ошондой эле кыянаттык менен пайдаланууну алдын алуу үчүн колдонулат.</p>
 
+    <p>Jarvis үчүн түзмөктө кокустук сессия ачкычы, серверде анын хэши
+    сакталат. Колдонуу жана төлөм жазууларына сурам идентификаторлору,
+    сурам хэштери, чаттын түзүлгөн жооптору, акысыз мүмкүнчүлүктөр,
+    кредит резервдери, кайтаруулар жана жандуу сүйлөшүүнүн мүнөттөрү
+    кирет. Алар кирүүнү, төлөмдү жана кайталанган сурамдарды башкаруу
+    үчүн Firebase Firestore базасында сакталат. Бул төлөм жазууларына
+    микрофондун аудиосу тиркелбейт. Автоматтык өчүрүү мөөнөтү
+    коюлган эмес.</p>
+
     <p>Instagram туташтырылса, аккаунт идентификаторлору, профиль,
     берилген уруксаттар, шифрленген кирүү токендери, туташуу даталары,
     жарыялоо жазуулары жана товар каталогу иштетилет.
@@ -536,6 +1160,7 @@ app.get("/privacy", (req, res) => {
     убакыт белгилери алынат. Бул колдонулган Instagram функцияларын
     камсыз кылат. Кирүү Instagram аркылуу жүргүзүлөт;
     колдоо кызматына Instagram сырсөзүңүздү жөнөтпөңүз.</p>
+
     <h3>AI контентине даттануулар</h3>
     <p>Колдонмонун ичинен даттануу жөнөткөндө EasyAI тандалган
     себепти, кошумча комментарийди, колдонмонун тилин жана
@@ -584,7 +1209,7 @@ app.get("/privacy", (req, res) => {
 
   <section id="ru" lang="ru">
     <h2>Политика конфиденциальности</h2>
-    <p>Обновлено: 12 октября 2026 года.
+    <p>Обновлено: 14 октября 2026 года.
     Контакт: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
 
     <h3>Данные и цели</h3>
@@ -596,6 +1221,15 @@ app.get("/privacy", (req, res) => {
     используются для предоставления бесплатного лимита, управления
     кредитами, проверки платежей и предотвращения злоупотреблений.</p>
 
+    <p>Для Jarvis на устройстве хранится случайный ключ сессии
+    приложения, а на сервере — его хэш. Записи использования и оплаты
+    включают идентификаторы и хэши запросов, созданные ответы чата,
+    бесплатный лимит, резервирование и возврат кредитов, а также
+    записи минут живого разговора. Они сохраняются в Firebase Firestore
+    для управления доступом, оплатой и повторными запросами.
+    Эти платёжные записи не прикрепляют аудио с микрофона.
+    Срок автоматического удаления не настроен.</p>
+
     <p>При подключении Instagram обрабатываются идентификаторы аккаунта,
     профиль, предоставленные разрешения, зашифрованные токены доступа,
     даты подключения, записи публикаций и каталог товаров.
@@ -604,6 +1238,7 @@ app.get("/privacy", (req, res) => {
     отметки. Это обеспечивает используемые функции Instagram.
     Авторизация проходит через Instagram;
     не отправляйте пароль Instagram службе поддержки EasyAI.</p>
+
     <h3>Жалобы на контент ИИ</h3>
     <p>При отправке жалобы внутри приложения EasyAI получает
     выбранную причину, необязательный комментарий, язык приложения
@@ -652,7 +1287,7 @@ app.get("/privacy", (req, res) => {
 
   <section id="tr" lang="tr">
     <h2>Gizlilik Politikası</h2>
-    <p>Güncelleme: 12 Ekim 2026.
+    <p>Güncelleme: 14 Ekim 2026.
     İletişim: <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>.</p>
 
     <h3>Veriler ve amaçlar</h3>
@@ -664,6 +1299,15 @@ app.get("/privacy", (req, res) => {
     verileri ücretsiz kullanım hakkını ve kredileri yönetmek,
     ödemeleri doğrulamak ve kötüye kullanımı önlemek için kullanılır.</p>
 
+    <p>Jarvis için cihazda rastgele bir uygulama oturum anahtarı,
+    sunucuda ise bunun özeti saklanır. Kullanım ve ödeme kayıtları
+    istek kimliklerini ve özetlerini, oluşturulan sohbet yanıtlarını,
+    ücretsiz hakları, kredi rezervasyonlarını, iadeleri ve canlı sohbet
+    dakika kayıtlarını içerir. Erişim, ödeme ve yinelenen istekleri
+    yönetmek için Firebase Firestore içinde saklanır.
+    Bu ödeme kayıtlarına mikrofon sesi eklenmez.
+    Otomatik silme süresi yapılandırılmamıştır.</p>
+
     <p>Instagram bağlandığında hesap kimlikleri, profil bilgileri,
     verilen izinler, şifrelenmiş erişim belirteçleri, bağlantı tarihleri,
     yayın kayıtları ve ürün kataloğu işlenir.
@@ -672,6 +1316,7 @@ app.get("/privacy", (req, res) => {
     Bunlar kullandığınız Instagram özelliklerini sağlar.
     Giriş Instagram üzerinden yapılır;
     Instagram şifrenizi EasyAI desteğine göndermeyin.</p>
+
     <h3>AI içerik bildirimleri</h3>
     <p>Uygulama içinden bir içerik bildirimi gönderdiğinizde
     EasyAI seçtiğiniz nedeni, isteğe bağlı yorumunuzu,
@@ -718,287 +1363,30 @@ app.get("/privacy", (req, res) => {
   </section>
 </main>
 </body>
-</html>`);
-});
-// AI yaratgan kontent haqidagi shikoyatlarni qabul qilish
-app.post("/api/content-reports", async (req, res) => {
-  try {
-    const body = req.body;
+</html>`;
 
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return res.status(400).json({
-        success: false,
-        code: "INVALID_CONTENT_REPORT",
-      });
-    }
+const server = app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      `EasyAI server porti: ${PORT}`,
+    );
+  },
+);
 
-    const allowedTypes = new Set(["video", "chat", "voice"]);
-    const allowedReasons = new Set([
-      "sexual",
-      "violence",
-      "hate",
-      "child_safety",
-      "misleading",
-      "other",
-    ]);
-    const allowedLanguages = new Set([
-      "English",
-      "Кыргызча",
-      "Русский",
-      "Türkçe",
-    ]);
+attachJarvis(app, server);
 
-    if (
-      !allowedTypes.has(body.contentType) ||
-      !allowedReasons.has(body.reason) ||
-      !allowedLanguages.has(body.language)
-    ) {
-      return res.status(400).json({
-        success: false,
-        code: "INVALID_CONTENT_REPORT",
-      });
-    }
-
-    const limits = {
-      details: 2000,
-      content: 20000,
-      prompt: 20000,
-      model: 100,
-      videoUrl: 4096,
-    };
-
-    const fields = {};
-
-    for (const [name, limit] of Object.entries(limits)) {
-      const value = body[name] ?? "";
-
-      if (typeof value !== "string" || value.length > limit) {
-        return res.status(400).json({
-          success: false,
-          code: "INVALID_CONTENT_REPORT",
-        });
-      }
-
-      fields[name] = value.trim();
-    }
-
-    const reportRef = db.collection("contentReports").doc();
-
-    await reportRef.set({
-      contentType: body.contentType,
-      reason: body.reason,
-      language: body.language,
-      ...fields,
-      status: "new",
-      createdAt: FieldValue.serverTimestamp(),
-    });
-
-    return res.status(201).json({
-      success: true,
-      reportId: reportRef.id,
-    });
-  } catch (error) {
-    console.error("CONTENT REPORT SAVE FAILED:", error);
-
-    return res.status(500).json({
-      success: false,
-      code: "CONTENT_REPORT_FAILED",
-    });
-  }
-});
-
-app.post("/api/generate-video", upload.single("image"), async (req, res) => {
-  console.log("=== GENERATE VIDEO REQUEST KELDI ===");
-  try {
-    console.log("UPLOAD DEBUG:", {
-  hasImage: !!req.file,
-  mimeType: req.file?.mimetype,
-  size: req.file?.size,
-});
-    const prompt =
-      typeof req.body?.prompt === "string"
-        ? req.body.prompt.trim()
-        : "";
-
-    if (!prompt) {
-      return res.status(400).json({
-        success: false,
-        error: "Prompt yozilmagan.",
-      });
-    }
-
-    
-const deviceId =
-  typeof req.body?.deviceId === "string"
-    ? req.body.deviceId.trim()
-    : "";
-
-if (!deviceId) {
-  return res.status(400).json({
-    success: false,
-    error: "Device ID topilmadi.",
-  });
-}
-console.log("DEVICE ID:", deviceId);
-const reviewCode =
-  typeof req.body?.reviewCode === "string"
-    ? req.body.reviewCode.trim()
-    : "";
-
-const isReviewAccess =
-  REVIEW_ACCESS_CODE.length > 0 &&
-  reviewCode === REVIEW_ACCESS_CODE;
-const usage = await getUserUsage(deviceId);
-
-console.log("USAGE CHECK:", {
-  freeVideosRemaining: usage.freeVideosRemaining,
-  credits: usage.credits,
-});
-if (!isReviewAccess && usage.freeVideosRemaining <= 0 && usage.credits < VIDEO_CREDIT_COST) {
-  return res.status(403).json({
-    success: false,
-    code: "FREE_LIMIT_REACHED",
-    error: "Bepul video limiti tugadi. Davom etish uchun kredit sotib oling.",
-  });
-}
-    console.log(`Prompt: ${prompt}`);
-
-   const videoId = `veo-${Date.now()}`;
-const remoteVideoUrl = await createVeoLiteVideo(prompt, req.file || null);
-
-
-    
-
-
-    const fileName = await saveVideo(remoteVideoUrl, videoId);
-
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const videoUrl = `${baseUrl}/videos/${fileName}`;
-const userRef = db.collection("users").doc(deviceId);
-
-if (!isReviewAccess) {
-  if (usage.freeVideosRemaining > 0) {
-    await userRef.update({
-      freeVideosRemaining: FieldValue.increment(-1),
-    });
-  } else {
-    await userRef.update({
-      credits: FieldValue.increment(-VIDEO_CREDIT_COST),
-    });
-  }
-}
-    return res.json({
-      success: true,
-      videoUrl,
-      video_url: videoUrl,
-      url: videoUrl,
-      videoId,
-      
-    });
-  } catch (error) {
-    console.error("GENERATE VIDEO ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Noma’lum server xatosi.",
-    });
-  }
-});
+// Barcha endpointlardan keyingi xato ushlagich.
 app.use((error, req, res, next) => {
-  console.error("Server xatosi:", error);
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  logError("Server error:", error);
 
   return res.status(500).json({
     success: false,
     error: "Serverda kutilmagan xato yuz berdi.",
   });
 });
-
-
-    
-app.post("/api/verify-purchase", async (req, res) => {
-  try {
-    const { purchaseToken, productId, deviceId } = req.body;
-
-    if (!purchaseToken || !productId || !deviceId) {
-      return res.status(400).json({
-        success: false,
-        error: "purchaseToken, productId va deviceId kerak.",
-      });
-    }
-
-    if (productId !== "credits_100") {
-      return res.status(400).json({
-        success: false,
-        error: "Noto'g'ri productId.",
-      });
-    }
-
-    const authClient = await googleAuth.getClient();
-
-    const result = await androidPublisher.purchases.products.get({
-      auth: authClient,
-      packageName: "com.easyai.video",
-      productId: productId,
-      token: purchaseToken,
-    });
-
-    if (result.data.purchaseState !== 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Google Play xaridi tasdiqlanmadi.",
-      });
-    }
-   const purchaseRef = db.collection("usedPurchases").doc(purchaseToken);
-const userRef = db.collection("users").doc(deviceId);
-
-const credited = await db.runTransaction(async (transaction) => {
-  const purchaseDoc = await transaction.get(purchaseRef);
-
-  if (purchaseDoc.exists) {
-    return false;
-  }
-
-  transaction.set(
-    userRef,
-    {
-      credits: FieldValue.increment(100),
-    },
-    { merge: true }
-  );
-
-  transaction.set(purchaseRef, {
-    deviceId: deviceId,
-    productId: productId,
-    usedAt: FieldValue.serverTimestamp(),
-  });
-
-  return true;
-});
-
-if (!credited) {
-  return res.status(409).json({
-    success: false,
-    error: "Bu xarid uchun kredit avval berilgan.",
-  });
-}
-    return res.json({
-      success: true,
-      credits: 100,
-    });
-  } catch (error) {
-    console.error("Google Play verify xato:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Xaridni tekshirishda xato.",
-    });
-  }
-});
-
-const server = app.listen(PORT, "0.0.0.0", () => {
-  console.log(`EasyAI server porti: ${PORT}`);
-});
-attachJarvis(app, server);
-
