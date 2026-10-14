@@ -22,7 +22,7 @@ class CreditPurchaseService {
   CreditPurchaseService._();
 
   static final instance = CreditPurchaseService._();
-  static const productId = 'credits_100';
+  static const productId = 'credits_500';
 
   final state = ValueNotifier(CreditPurchaseState.idle);
   final _store = InAppPurchase.instance;
@@ -110,7 +110,10 @@ class CreditPurchaseService {
 
   Future<void> _handle(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
-      if (purchase.productID != productId) continue;
+      if (purchase.productID != productId &&
+    purchase.productID != 'credits_100') {
+  continue;
+}
 
       if (purchase.status == PurchaseStatus.pending) {
         state.value = CreditPurchaseState.pending;

@@ -174,7 +174,7 @@ class _CreditsPageState extends State<CreditsPage>
 
   @override
   Widget build(BuildContext context) {
-    final count = _account?['productCredits'] ?? 100;
+    final count = _account?['productCredits'] ?? 500;
 
     final blocked = _loading ||
         _product == null ||

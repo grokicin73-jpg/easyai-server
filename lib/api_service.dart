@@ -72,7 +72,7 @@ class ApiService {
     if (!await store.isAvailable()) return false;
 
     final result = await store.queryProductDetails({
-      'credits_100',
+      'credits_500',
     });
 
     if (result.error != null || result.productDetails.length != 1) {

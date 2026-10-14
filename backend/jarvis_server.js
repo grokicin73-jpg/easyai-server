@@ -108,8 +108,8 @@ export function attachJarvis(
         freeChatRemaining: data.jarvisFreeChatsRemaining || 0,
         freeLiveMinutesRemaining:
           data.jarvisFreeLiveMinutesRemaining || 0,
-        productId: "credits_100",
-        productCredits: 100,
+        productId: "credits_500",
+        productCredits: 500,
         videoCost: 6,
       });
     } catch {

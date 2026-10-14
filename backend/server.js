@@ -890,7 +890,7 @@ app.post("/api/verify-purchase", async (req, res) => {
       purchaseToken === "." ||
       purchaseToken === ".." ||
       Buffer.byteLength(purchaseToken, "utf8") > 1500 ||
-      productId !== "credits_100"
+      !["credits_100", "credits_500"].includes(productId)
     ) {
       return res.status(400).json({
         success: false,
@@ -961,7 +961,7 @@ app.post("/api/verify-purchase", async (req, res) => {
                   freeVideosRemaining: FREE_VIDEOS,
                   createdAt: FieldValue.serverTimestamp(),
                 }),
-            credits: FieldValue.increment(100),
+           credits: FieldValue.increment(productId === "credits_500" ? 500 : 100)
           },
           { merge: true },
         );
@@ -976,11 +976,11 @@ app.post("/api/verify-purchase", async (req, res) => {
       },
     );
 
-    return res.json({
-      success: true,
-      credits: credited ? 100 : 0,
-      alreadyCredited: !credited,
-    });
+   return res.json({
+  success: true,
+  credits: credited ? (productId === "credits_500" ? 500 : 100) : 0,
+  alreadyCredited: !credited,
+});
   } catch (error) {
     if (
       [
