@@ -370,7 +370,11 @@ export function createJarvisAccess(app) {
           };
         }
 
-        throw fail(409, "JARVIS_REQUEST_ALREADY_USED");
+        // A refunded provider failure can be retried with the same ID.
+        // Pending requests remain locked; completed requests return the cache.
+        if (saved.status !== "failed") {
+          throw fail(409, "JARVIS_REQUEST_ALREADY_USED");
+        }
       }
 
       const userSnapshot = await transaction.get(userRef);

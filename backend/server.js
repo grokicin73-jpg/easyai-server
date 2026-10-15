@@ -905,6 +905,28 @@ app.post("/api/verify-purchase", async (req, res) => {
       (await userRef.get()).data(),
     );
 
+    const purchaseRef = db
+      .collection("usedPurchases")
+      .doc(purchaseToken);
+
+    // A retry may arrive after Google Play consumed the purchase.
+    // Our committed receipt remains authoritative for the same owner/product.
+    const savedPurchase = await purchaseRef.get();
+    if (savedPurchase.exists) {
+      const previous = savedPurchase.data();
+      if (
+        previous.deviceId !== deviceId ||
+        previous.productId !== productId
+      ) {
+        throw requestError(409, "PURCHASE_ALREADY_LINKED");
+      }
+      return res.json({
+        success: true,
+        credits: 0,
+        alreadyCredited: true,
+      });
+    }
+
     const authClient = await googleAuth.getClient();
 
     const result =
@@ -921,10 +943,6 @@ app.post("/api/verify-purchase", async (req, res) => {
         error: "Google Play xaridi tasdiqlanmadi.",
       });
     }
-
-    const purchaseRef = db
-      .collection("usedPurchases")
-      .doc(purchaseToken);
 
     const credited = await db.runTransaction(
       async (transaction) => {
@@ -961,7 +979,9 @@ app.post("/api/verify-purchase", async (req, res) => {
                   freeVideosRemaining: FREE_VIDEOS,
                   createdAt: FieldValue.serverTimestamp(),
                 }),
-           credits: FieldValue.increment(productId === "credits_500" ? 500 : 100)
+            credits: FieldValue.increment(
+              productId === "credits_500" ? 500 : 100,
+            ),
           },
           { merge: true },
         );
@@ -976,11 +996,11 @@ app.post("/api/verify-purchase", async (req, res) => {
       },
     );
 
-   return res.json({
-  success: true,
-  credits: credited ? (productId === "credits_500" ? 500 : 100) : 0,
-  alreadyCredited: !credited,
-});
+    return res.json({
+      success: true,
+      credits: credited ? (productId === "credits_500" ? 500 : 100) : 0,
+      alreadyCredited: !credited,
+    });
   } catch (error) {
     if (
       [
