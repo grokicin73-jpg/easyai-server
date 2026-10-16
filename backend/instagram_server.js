@@ -473,6 +473,13 @@ export function attachInstagram(
       error.metaSubcode = data.error?.error_subcode;
       error.metaType = data.error?.type;
       error.metaMessage = data.error?.message;
+      const endpoint = new URL(url);
+
+      console.error("INSTAGRAM FAILED ENDPOINT:", {
+        method: options.method || "GET",
+        host: endpoint.hostname,
+        path: endpoint.pathname,
+      });
 
       throw error;
     }
