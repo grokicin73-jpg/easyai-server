@@ -831,12 +831,20 @@ const needsSeller =
   asksForContact;
 
 if (needsSeller) {
-  const language =
-    decision?.language || languageOf(message.text);
+        const language =
+          decision?.language || languageOf(message.text);
 
-  replyText +=
-    "\n\n" + sellerContactReply(business, language);
-}
+        const contactText = sellerContactReply(
+          business,
+          language,
+        );
+
+        if (asksForContact) {
+          replyText = contactText;
+        } else {
+          replyText += "\n\n" + contactText;
+        }
+      }
 
       if (!replyText || replyText.length > 1000) {
         tx.update(ref, {
