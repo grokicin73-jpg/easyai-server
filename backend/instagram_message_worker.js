@@ -91,7 +91,7 @@ function languageOf(text) {
   }
 
   if (
-    /\b(salom|qancha|narx|narxi|mahsulot|bormi|buyurtma)\b/i
+    /\b(salom|qancha|kancha|necha|narx|narxi|narhi|razmer|razmeri|rangi|qanday|kanday|mahsulot|bormi|buyurtma)\b/i
       .test(value)
   ) {
     return "uz";
