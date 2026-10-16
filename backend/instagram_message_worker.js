@@ -235,6 +235,82 @@ function productReply(
     product.description.slice(0, 450),
   ].filter(Boolean).join("\n\n");
 }
+function explicitCatalogReply(text, products) {
+  const catalogue = products.filter(validProduct);
+  const query = ` ${normalize(text)} `;
+
+  const matches = catalogue
+    .filter((product) => {
+      const name = normalize(product.name);
+      return name && query.includes(` ${name} `);
+    })
+    .sort(
+      (a, b) =>
+        normalize(b.name).length -
+        normalize(a.name).length,
+    );
+
+  if (!matches.length) return null;
+
+  const product = matches[0];
+  const name = normalize(product.name);
+
+  // Bir xil nomli bir nechta mahsulot bo‘lsa, taxmin qilmaymiz.
+  if (
+    matches.filter(
+      (item) => normalize(item.name).length === name.length,
+    ).length !== 1
+  ) {
+    return null;
+  }
+
+  // Ikki alohida mahsulot so‘ralgan bo‘lsa, AI aniqlashtiradi.
+  // "Qishki shapka" ichidagi "shapka" esa alohida hisoblanmaydi.
+  if (
+    matches.some(
+      (item) =>
+        !` ${name} `.includes(
+          ` ${normalize(item.name)} `,
+        ),
+    )
+  ) {
+    return null;
+  }
+
+  const remaining = query
+    .replace(` ${name} `, " ")
+    .trim();
+
+  const allowedWords = new Set(
+    normalize(`
+      salom iltimos haqida malumot ma lumot
+      bering ayting qancha kancha necha
+      narx narxi narhi narhini narxini
+      razmer razmeri razmerlari razmerlarini
+      olcham o lcham olchami o lchami
+      rang rangi rangu ranglari
+      qanday kanday qanaqa va ham
+      bormi bor mavjud sotuvda turadi nechi
+    `).split(" "),
+  );
+
+  // Yetkazish, chegirma yoki boshqa noma’lum shartlarni
+  // bu javob bilan almashtirmaymiz.
+  const simpleQuestion = remaining
+    .split(" ")
+    .filter(Boolean)
+    .every((word) => allowedWords.has(word));
+
+  if (!simpleQuestion) return null;
+
+  const labels = TEXTS[languageOf(text)];
+
+  return productReply(
+    product,
+    labels,
+    "fallback",
+  );
+}
 
 export function buildCatalogReply(text, products) {
   const labels = TEXTS[languageOf(text)];
@@ -705,9 +781,18 @@ export function startInstagramMessageWorker(
         }))
         .filter(validProduct);
 
-      const replyText = decision
-        ? buildPlannedReply(decision, products)
-        : buildCatalogReply(message.text, products);
+      const directReply = explicitCatalogReply(
+  message.text,
+  products,
+);
+
+const replyText =
+  directReply ??
+  (
+    decision
+      ? buildPlannedReply(decision, products)
+      : buildCatalogReply(message.text, products)
+  );
 
       if (!replyText || replyText.length > 1000) {
         tx.update(ref, {
