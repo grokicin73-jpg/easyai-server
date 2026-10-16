@@ -16,6 +16,29 @@ const CURRENCIES = [
 const MAX_PRODUCTS = 1000;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 50;
+function normalizeWhatsApp(value) {
+  if (typeof value !== "string" || value.length > 40) {
+    return null;
+  }
+
+  const phone = value.trim();
+
+  // Bo‘sh qiymat raqamni olib tashlash uchun.
+  if (!phone) return "";
+
+  if (!/^\+?[\d\s()-]+$/.test(phone)) {
+    return null;
+  }
+
+  const digits = phone.replace(/\D/g, "");
+
+  // Xalqaro format: mamlakat kodi bilan.
+  if (!/^[1-9]\d{7,14}$/.test(digits)) {
+    return null;
+  }
+
+  return `+${digits}`;
+}
 
 function validId(value) {
   return (
@@ -421,6 +444,52 @@ export function attachInstagramBusiness(
   });
 
   router.put("/settings", saveSettings);
+  // Faqat tizimga ulangan egasining do‘kon kontaktini saqlaydi.
+router.put(
+  "/contact",
+  wrap(async (req, res) => {
+    const phone = normalizeWhatsApp(
+      req.body?.whatsappPhone,
+    );
+
+    if (phone === null) {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_WHATSAPP_PHONE",
+      });
+    }
+
+    await businesses.doc(req.instagramOwnerId).set(
+      {
+        whatsappPhone: phone,
+        contactUpdatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return res.json({
+      success: true,
+      whatsappPhone: phone,
+    });
+  }),
+);
+
+router.get(
+  "/contact",
+  wrap(async (req, res) => {
+    const saved = await businesses
+      .doc(req.instagramOwnerId)
+      .get();
+
+    const phone =
+      normalizeWhatsApp(saved.data()?.whatsappPhone) || "";
+
+    return res.json({
+      success: true,
+      whatsappPhone: phone,
+    });
+  }),
+);
 
   router.put(
     "/products/:productId",

@@ -635,6 +635,8 @@ class _InstagramProductsPageState
             ),
             Text(_t('replyHelp')),
             const SizedBox(height: 16),
+            _SellerWhatsAppCard(language: widget.language),
+            const SizedBox(height: 16),
             Text(
               '${_products.length} / $_total · $_maxProducts',
               style: const TextStyle(color: Colors.white60),
@@ -976,6 +978,251 @@ class _ProductEditorPageState
                 ],
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+class _SellerWhatsAppCard extends StatefulWidget {
+  final String language;
+
+  const _SellerWhatsAppCard({
+    required this.language,
+  });
+
+  @override
+  State<_SellerWhatsAppCard> createState() =>
+      _SellerWhatsAppCardState();
+}
+
+class _SellerWhatsAppCardState
+    extends State<_SellerWhatsAppCard> {
+  final _api = ApiService();
+  final _phone = TextEditingController();
+  final _form = GlobalKey<FormState>();
+
+  bool _busy = true;
+  bool _loaded = false;
+  String? _error;
+
+  String _text(String key) {
+    const texts = <String, List<String>>{
+      'title': [
+        'Seller WhatsApp',
+        'Сатуучунун WhatsApp номери',
+        'WhatsApp продавца',
+        'Satıcının WhatsApp numarası',
+      ],
+      'phone': [
+        'Phone number with country code',
+        'Өлкө коду менен телефон номери',
+        'Номер телефона с кодом страны',
+        'Ülke koduyla telefon numarası',
+      ],
+      'help': [
+        'Customers receive this number and a WhatsApp link when they need the seller. Clear the field and save to remove it.',
+        'Сатуучу керек болгондо кардарга бул номер жана WhatsApp шилтемеси жөнөтүлөт. Өчүрүү үчүн талааны бошотуп, сактаңыз.',
+        'Когда клиенту нужен продавец, ему отправляются этот номер и ссылка WhatsApp. Для удаления очистите поле и сохраните.',
+        'Satıcı gerektiğinde müşteriye bu numara ve WhatsApp bağlantısı gönderilir. Kaldırmak için alanı boşaltıp kaydedin.',
+      ],
+      'invalid': [
+        'Enter a full number, for example +996700123456.',
+        'Толук номер жазыңыз, мисалы +996700123456.',
+        'Введите полный номер, например +996700123456.',
+        'Tam numarayı girin, örneğin +996700123456.',
+      ],
+      'loadError': [
+        'Could not load the number. Tap Refresh.',
+        'Номер жүктөлгөн жок. Жаңыртууну басыңыз.',
+        'Не удалось загрузить номер. Нажмите «Обновить».',
+        'Numara yüklenemedi. Yenile’ye basın.',
+      ],
+      'saveError': [
+        'Saving was not confirmed. Your input is kept. Try saving again.',
+        'Сактоо ырасталган жок. Жазганыңыз сакталды. Кайра сактап көрүңүз.',
+        'Сохранение не подтверждено. Введённый номер оставлен в поле. Повторите сохранение.',
+        'Kayıt doğrulanamadı. Girdiğiniz numara alanda duruyor. Tekrar kaydedin.',
+      ],
+      'saved': [
+        'WhatsApp number saved.',
+        'WhatsApp номери сакталды.',
+        'Номер WhatsApp сохранён.',
+        'WhatsApp numarası kaydedildi.',
+      ],
+      'removed': [
+        'WhatsApp number removed.',
+        'WhatsApp номери өчүрүлдү.',
+        'Номер WhatsApp удалён.',
+        'WhatsApp numarası kaldırıldı.',
+      ],
+    };
+
+    final index = switch (widget.language) {
+      'Кыргызча' => 1,
+      'Русский' => 2,
+      'Türkçe' => 3,
+      _ => 0,
+    };
+
+    return texts[key]![index];
+  }
+
+  String? _validatePhone(String? input) {
+    final value = (input ?? '').trim();
+
+    if (value.isEmpty) return null;
+
+    if (value.length > 40 ||
+        !RegExp(r'^\+?[\d\s()-]+$').hasMatch(value)) {
+      return _text('invalid');
+    }
+
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+
+    return RegExp(r'^[1-9]\d{7,14}$').hasMatch(digits)
+        ? null
+        : _text('invalid');
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final phone = await _api.getInstagramWhatsAppPhone();
+
+      if (!mounted) return;
+
+      setState(() {
+        _phone.text = phone;
+        _loaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() => _error = _text('loadError'));
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _save() async {
+    if (_busy || !_loaded || !_form.currentState!.validate()) {
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final saved = await _api.saveInstagramWhatsAppPhone(
+        _phone.text,
+      );
+
+      if (!mounted) return;
+
+      _phone.text = saved;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _text(saved.isEmpty ? 'removed' : 'saved'),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() => _error = _text('saveError'));
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _text('title'),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(_text('help')),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _phone,
+                enabled: _loaded && !_busy,
+                keyboardType: TextInputType.phone,
+                textDirection: TextDirection.ltr,
+                maxLength: 40,
+                decoration: InputDecoration(
+                  labelText: _text('phone'),
+                  hintText: '+996700123456',
+                  border: const OutlineInputBorder(),
+                ),
+                validator: _validatePhone,
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Colors.orangeAccent,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              if (_loaded)
+                FilledButton.icon(
+                  onPressed: _busy ? null : _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(_pt(widget.language, 'save')),
+                )
+              else if (!_busy)
+                OutlinedButton.icon(
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh),
+                  label: Text(_pt(widget.language, 'refresh')),
+                ),
+              if (_busy) ...[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(),
+              ],
+            ],
           ),
         ),
       ),

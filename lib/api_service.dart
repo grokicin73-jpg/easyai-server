@@ -30,6 +30,7 @@ class ApiService {
     const androidIdPlugin = AndroidId();
     final rawId = await androidIdPlugin.getId();
     final deviceId = rawId?.trim().toLowerCase() ?? '';
+    print('EASYAI_DEVICE_ID: $deviceId');
 
     if (!RegExp(r'^[a-f0-9]{16}$').hasMatch(deviceId)) {
       throw StateError('JARVIS_DEVICE_ID_UNAVAILABLE');
@@ -94,7 +95,11 @@ class ApiService {
 
     final response = await _dio.get(
       '/api/jarvis/account',
-      options: Options(headers: headers),
+      options: Options(
+        headers: headers,
+        sendTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
     );
 
     final data = response.data;
@@ -627,6 +632,64 @@ class ApiService {
 
     if (saved is! bool || saved != enabled) {
       throw const FormatException('INVALID_SETTINGS_RESPONSE');
+    }
+
+    return saved;
+  }
+  Future<String> getInstagramWhatsAppPhone() async {
+    final options = await _instagramOptions();
+
+    final response = await _dio.get(
+      '/api/instagram/business/contact',
+      options: options,
+    );
+
+    final data = _businessData(response);
+    final phone = data['whatsappPhone'];
+
+    if (phone is! String ||
+        (phone.isNotEmpty &&
+            !RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(phone))) {
+      throw const FormatException('INVALID_CONTACT_RESPONSE');
+    }
+
+    return phone;
+  }
+
+  Future<String> saveInstagramWhatsAppPhone(
+    String input,
+  ) async {
+    final value = input.trim();
+
+    if (value.length > 40 ||
+        (value.isNotEmpty &&
+            !RegExp(r'^\+?[\d\s()-]+$').hasMatch(value))) {
+      throw ArgumentError('INVALID_WHATSAPP_PHONE');
+    }
+
+    final digits = value.replaceAll(RegExp(r'\D'), '');
+
+    if (value.isNotEmpty &&
+        !RegExp(r'^[1-9]\d{7,14}$').hasMatch(digits)) {
+      throw ArgumentError('INVALID_WHATSAPP_PHONE');
+    }
+
+    final phone = value.isEmpty ? '' : '+$digits';
+    final options = await _instagramOptions();
+
+    final response = await _dio.put(
+      '/api/instagram/business/contact',
+      options: options,
+      data: {
+        'whatsappPhone': phone,
+      },
+    );
+
+    final data = _businessData(response);
+    final saved = data['whatsappPhone'];
+
+    if (saved is! String || saved != phone) {
+      throw const FormatException('CONTACT_SAVE_NOT_CONFIRMED');
     }
 
     return saved;

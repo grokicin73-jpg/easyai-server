@@ -389,6 +389,33 @@ export function buildPlannedReply(decision, products) {
     decision,
   );
 }
+function sellerContactReply(business, language) {
+  const raw = business?.whatsappPhone;
+
+  const phone =
+    typeof raw === "string" &&
+    /^\+[1-9]\d{7,14}$/.test(raw)
+      ? raw
+      : "";
+
+  if (phone) {
+    return [
+      "WhatsApp",
+      phone,
+      `https://wa.me/${phone.slice(1)}`,
+    ].join("\n");
+  }
+
+  const messages = {
+    uz: "Sotuvchining WhatsApp raqami kiritilmagan. Shu Instagram suhbatida xabar qoldiring.",
+    ky: "Сатуучунун WhatsApp номери киргизилген эмес. Ушул Instagram чатына билдирүү калтырыңыз.",
+    ru: "Номер WhatsApp продавца не указан. Оставьте сообщение в этом чате Instagram.",
+    tr: "Satıcının WhatsApp numarası belirtilmemiş. Bu Instagram sohbetine mesaj bırakın.",
+    en: "The seller has not provided a WhatsApp number. Leave a message in this Instagram chat.",
+  };
+
+  return messages[language] || messages.en;
+}
 
 function blockedReason(account, business, message) {
   const now = Date.now();
@@ -786,13 +813,30 @@ export function startInstagramMessageWorker(
   products,
 );
 
-const replyText =
+let replyText =
   directReply ??
   (
     decision
       ? buildPlannedReply(decision, products)
       : buildCatalogReply(message.text, products)
   );
+
+const asksForContact =
+  /whats\s*app|ватсап|вотсап|ватцап|bog[l‘’ʻʼ']*lan|telefon|номер|телефон|contact|байланыш|iletişim/i
+    .test(message.text);
+
+const needsSeller =
+  decision?.intent === "human" ||
+  decision?.intent === "order" ||
+  asksForContact;
+
+if (needsSeller) {
+  const language =
+    decision?.language || languageOf(message.text);
+
+  replyText +=
+    "\n\n" + sellerContactReply(business, language);
+}
 
       if (!replyText || replyText.length > 1000) {
         tx.update(ref, {
