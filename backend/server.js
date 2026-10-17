@@ -872,6 +872,13 @@ app.post(
   },
 );
 
+const CREDIT_PACKAGES = Object.freeze({
+  credits_20: 20,
+  credits_200: 200,
+  credits_500: 500,
+  credits_100: 100,
+});
+
 app.post("/api/verify-purchase", async (req, res) => {
   try {
     const body = req.body || {};
@@ -890,13 +897,16 @@ app.post("/api/verify-purchase", async (req, res) => {
       purchaseToken === "." ||
       purchaseToken === ".." ||
       Buffer.byteLength(purchaseToken, "utf8") > 1500 ||
-      !["credits_100", "credits_500"].includes(productId)
+      typeof productId !== "string" ||
+      !Object.hasOwn(CREDIT_PACKAGES, productId)
     ) {
       return res.status(400).json({
         success: false,
-        error: "Xarid ma'lumotlari noto'g'ri.",
+        code: "INVALID_PURCHASE",
       });
     }
+
+    const creditsToAdd = CREDIT_PACKAGES[productId];
 
     const userRef = db.collection("users").doc(deviceId);
 
@@ -909,17 +919,21 @@ app.post("/api/verify-purchase", async (req, res) => {
       .collection("usedPurchases")
       .doc(purchaseToken);
 
-    // A retry may arrive after Google Play consumed the purchase.
-    // Our committed receipt remains authoritative for the same owner/product.
     const savedPurchase = await purchaseRef.get();
+
     if (savedPurchase.exists) {
       const previous = savedPurchase.data();
+
       if (
         previous.deviceId !== deviceId ||
         previous.productId !== productId
       ) {
-        throw requestError(409, "PURCHASE_ALREADY_LINKED");
+        throw requestError(
+          409,
+          "PURCHASE_ALREADY_LINKED",
+        );
       }
+
       return res.json({
         success: true,
         credits: 0,
@@ -940,7 +954,7 @@ app.post("/api/verify-purchase", async (req, res) => {
     if (result.data.purchaseState !== 0) {
       return res.status(400).json({
         success: false,
-        error: "Google Play xaridi tasdiqlanmadi.",
+        code: "PURCHASE_NOT_CONFIRMED",
       });
     }
 
@@ -979,9 +993,7 @@ app.post("/api/verify-purchase", async (req, res) => {
                   freeVideosRemaining: FREE_VIDEOS,
                   createdAt: FieldValue.serverTimestamp(),
                 }),
-            credits: FieldValue.increment(
-              productId === "credits_500" ? 500 : 100,
-            ),
+            credits: FieldValue.increment(creditsToAdd),
           },
           { merge: true },
         );
@@ -989,6 +1001,7 @@ app.post("/api/verify-purchase", async (req, res) => {
         transaction.set(purchaseRef, {
           deviceId,
           productId,
+          credits: creditsToAdd,
           usedAt: FieldValue.serverTimestamp(),
         });
 
@@ -998,7 +1011,7 @@ app.post("/api/verify-purchase", async (req, res) => {
 
     return res.json({
       success: true,
-      credits: credited ? (productId === "credits_500" ? 500 : 100) : 0,
+      credits: credited ? creditsToAdd : 0,
       alreadyCredited: !credited,
     });
   } catch (error) {
@@ -1019,11 +1032,10 @@ app.post("/api/verify-purchase", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      error: "Xaridni tekshirishda xato.",
+      code: "PURCHASE_VERIFICATION_FAILED",
     });
   }
 });
-
 const PRIVACY_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
