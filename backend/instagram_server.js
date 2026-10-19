@@ -10,6 +10,8 @@ import {
 
 import {
   startInstagramMessageWorker,
+  isAutomaticShopMessage,
+  markAutomaticShopReply,
 } from "./instagram_message_worker.js";
 
 const BASE = "https://easyai-server.onrender.com";
@@ -184,6 +186,19 @@ export function attachInstagram(
       if (!message || message.state !== "reply_ready") {
         return null;
       }
+      if (isAutomaticShopMessage(message.text)) {
+        tx.update(inboxRef, {
+          state: "reply_skipped",
+          replyError: "AUTOMATIC_SHOP_MESSAGE",
+          replyUpdatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return null;
+      }
+      message.replyText = markAutomaticShopReply(
+        message.replyText,
+        message.text,
+      );
 
       const ownerId = message.replyOwnerId;
 
@@ -283,6 +298,7 @@ export function attachInstagram(
 
       tx.update(inboxRef, {
         state: "sending",
+        replyText: message.replyText,
         replyAttemptAt: FieldValue.serverTimestamp(),
       });
 

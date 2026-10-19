@@ -68,6 +68,49 @@ const TEXTS = {
     order: "Buyurtma tasdiqlanmadi. Xaridni sotuvchi bilan kelishing.",
   },
 };
+export function isAutomaticShopMessage(value) {
+  if (typeof value !== "string") return false;
+
+  const markerKey = (text) =>
+    normalize(
+      text
+        .toLowerCase()
+        .replace(/\u0307/gu, "")
+        .replace(/ı/gu, "i"),
+    );
+
+  const text = markerKey(value);
+
+  return Object.values(TEXTS).some((labels) => {
+    const prefix = markerKey(labels.intro);
+
+    return (
+      text === prefix ||
+      text.startsWith(`${prefix} `)
+    );
+  });
+}
+
+export function markAutomaticShopReply(
+  replyText,
+  incomingText,
+) {
+  if (typeof replyText !== "string") return "";
+
+  const text = replyText.trim();
+
+  if (!text || isAutomaticShopMessage(text)) {
+    return text;
+  }
+
+  const language = languageOf(
+    typeof incomingText === "string"
+      ? incomingText
+      : "",
+  );
+
+  return `${TEXTS[language].intro}\n\n${text}`;
+}
 
 function languageOf(text) {
   const value = text.toLowerCase();
@@ -526,6 +569,20 @@ export function startInstagramMessageWorker(
 
       if (!message) return null;
 
+      if (
+        ["received", "reply_preparing", "reply_ready"]
+          .includes(message.state) &&
+        isAutomaticShopMessage(message.text)
+      ) {
+        tx.update(ref, {
+          state: "reply_skipped",
+          replyError: "AUTOMATIC_SHOP_MESSAGE",
+          replyUpdatedAt: FieldValue.serverTimestamp(),
+        });
+
+        
+      }
+
       if (message.state === "reply_ready") {
         return { ready: true };
       }
@@ -845,6 +902,10 @@ if (needsSeller) {
           replyText += "\n\n" + contactText;
         }
       }
+      replyText = markAutomaticShopReply(
+        replyText,
+        message.text,
+      );
 
       if (!replyText || replyText.length > 1000) {
         tx.update(ref, {
