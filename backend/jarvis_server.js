@@ -1230,7 +1230,7 @@ Only the customer auto-reply setting can be changed with its tool.
 
         const content = message.serverContent;
 
-        if (!content || !ready) return;
+        if (!content || !started) return;
 
         if (content.interrupted) {
           sendPhone({

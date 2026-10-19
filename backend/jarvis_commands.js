@@ -33,12 +33,12 @@ export function commandIntent(value) {
     /video|vid[еe3]o|видео|ролик|reel/u.test(text);
 
   const make =
-    /(?:^|\s)(?:create|generate|make|yarat|yaratib|yarating|yaratgin|ярат|яратиб|жарат|жаратып|жаратыңыз|түзүп|түз|создай|создайте|сделай|oluştur|hazırla)(?:\s|[.,!]|$)/u.test(
+    /(?:^|\s)(?:create|generate|make|yarat|yaratib|yarating|yaratgin|tayyorla|tayyorlab|tayyorlang|tayyorlangiz|тайёрла|тайёрлаб|ярат|яратиб|жарат|жаратып|жаратыңыз|түзүп|түз|создай|создайте|сделай|oluştur|hazırla)(?:\s|[.,!]|$)/u.test(
       text,
     );
 
   const publish =
-    /(?:^|\s)(?:publish|post|upload|joyla|joylab|joylashtir|joylashtirib|жойла|жарыяла|жарыялап|жарыялаңыз|опубликуй|выложи|yayınla|paylaş)(?:\s|[.,!]|$)/u.test(
+    /(?:^|\s)(?:publish|post|upload|joyla|joylab|joylang|joylashtir|joylashtirib|joylashtiring|yukla|yuklab|yuklang|yuklangiz|юклаб|юкла|жойла|жарыяла|жарыялап|жарыялаңыз|опубликуй|выложи|yayınla|paylaş)(?:\s|[.,!]|$)/u.test(
       text,
     );
 
