@@ -1027,6 +1027,11 @@ if (needsSeller) {
           console.error(
             "Instagram message worker: processing failed",
             error?.code || error?.name || "UNKNOWN",
+            String(error?.message || "").slice(0, 500),
+            String(error?.stack || "")
+              .split("\n")
+              .slice(1, 4)
+              .join("\n"),
           );
 
           schedule(id, 10000);
