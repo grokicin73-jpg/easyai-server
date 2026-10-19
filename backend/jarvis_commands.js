@@ -30,7 +30,7 @@ export function commandIntent(value) {
   }
 
   const video =
-    /video|vid[еe3]o|видео|ролик|reel/u.test(text);
+    /video|vid[еe3]o|видео|ролик|reel|multfilm|multik|мультфильм|мультик|cartoon|çizgi\s+film/u.test(text);
 
   const make =
     /(?:^|\s)(?:create|generate|make|yarat|yaratib|yarating|yaratgin|tayyorla|tayyorlab|tayyorlang|tayyorlangiz|тайёрла|тайёрлаб|ярат|яратиб|жарат|жаратып|жаратыңыз|түзүп|түз|создай|создайте|сделай|oluştur|hazırla)(?:\s|[.,!]|$)/u.test(
