@@ -579,6 +579,7 @@ export function startInstagramMessageWorker(
           replyError: "AUTOMATIC_SHOP_MESSAGE",
           replyUpdatedAt: FieldValue.serverTimestamp(),
         });
+        return null;
 
         
       }
