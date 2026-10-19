@@ -21,6 +21,92 @@ import { attachInstagram } from "./instagram_server.js";
 import { attachInstagramWebhook } from "./instagram_webhook.js";
 
 const app = express();
+app.get("/business", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EasyAI — Business Information</title>
+  <style>
+    body {
+      margin: 0;
+      background: #101010;
+      color: #eeeeee;
+      font: 17px/1.7 Arial, sans-serif;
+    }
+    main {
+      max-width: 800px;
+      margin: auto;
+      padding: 40px 24px;
+    }
+    h1, h2 { color: white; }
+    section {
+      border-bottom: 1px solid #444;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+    a { color: #9acaff; }
+    address { font-style: normal; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>EasyAI</h1>
+
+  <section lang="en">
+    <h2>About EasyAI</h2>
+    <p>EasyAI is a mobile application offering AI video creation,
+    a voice assistant, and tools for managing supported professional
+    Instagram accounts with the account owner's permission.
+    Instagram features depend on Meta permissions and account eligibility.</p>
+  </section>
+
+  <section lang="ky">
+    <h2>EasyAI жөнүндө</h2>
+    <p>EasyAI — жасалма интеллект менен видео түзүү,
+    үн жардамчысы жана аккаунт ээсинин уруксаты менен
+    кесипкөй Instagram аккаунттарын башкаруу куралдарын
+    сунуштаган мобилдик тиркеме. Instagram функциялары
+    Meta уруксаттарына жана аккаунттун талаптарга шайкештигине жараша иштейт.</p>
+  </section>
+
+  <section lang="ru">
+    <h2>О приложении EasyAI</h2>
+    <p>EasyAI — мобильное приложение для создания видео
+    с помощью ИИ, общения с голосовым помощником и управления
+    поддерживаемыми профессиональными аккаунтами Instagram
+    с разрешения владельца. Функции Instagram зависят
+    от разрешений Meta и соответствия аккаунта требованиям.</p>
+  </section>
+
+  <section lang="tr">
+    <h2>EasyAI hakkında</h2>
+    <p>EasyAI; yapay zekayla video oluşturma, sesli asistan
+    ve hesap sahibinin izniyle desteklenen profesyonel Instagram
+    hesaplarını yönetme araçları sunan bir mobil uygulamadır.
+    Instagram özellikleri Meta izinlerine ve hesap uygunluğuna bağlıdır.</p>
+  </section>
+
+  <section>
+  <h2>Business owner / Владелец</h2>
+  <p>Индивидуальный предприниматель:
+  Расулжан уулу Шерзодбек</p>
+  <p>Кыргызская Республика, Базар-Коргон</p>
+  <p>Email:
+    <a href="mailto:grokicin73@gmail.com">grokicin73@gmail.com</a>
+  </p>
+</section>
+
+  <p>
+    <a href="https://doc-hosting.flycricket.io/easyai-pro-privacy-policy/e2ef82e2-9968-4bee-bc2b-161b76c8dc68/privacy">
+      Privacy Policy / Политика конфиденциальности
+    </a>
+  </p>
+</main>
+</body>
+</html>`);
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
