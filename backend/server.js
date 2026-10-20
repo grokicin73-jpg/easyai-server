@@ -113,8 +113,8 @@ const upload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024,
     files: 1,
-    fields: 4,
-    fieldSize: 24000,
+    fields: 5,
+    fieldSize: 100000,
   },
 });
 
@@ -554,12 +554,105 @@ async function fetchWithRetry(
 
   throw new Error("Veo request failed after retries");
 }
+async function prepareVideoPrompt(rawPrompt) {
+  const text = rawPrompt.trim();
+
+  if (text.length <= 2200) {
+    return text;
+  }
+
+  if (!GEMINI_API_KEY) {
+    throw new Error("VIDEO_PROMPT_API_KEY_MISSING");
+  }
+
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/" +
+    "models/gemini-3.1-flash-lite:generateContent",
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(45000),
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [
+            {
+              text:
+                "Adapt the user's brief into an English " +
+                "video prompt for one 8-second clip. " +
+                "Preserve the main subject, identity requirements, " +
+                "appearance, setting, essential actions, " +
+                "camera style, lighting and audio instructions. " +
+                "Make movements physically plausible. " +
+                "Do not invent dialogue or additional events. " +
+                "Do not remove safety restrictions. " +
+                "If the brief explicitly requires more than " +
+                "8 seconds, return only MULTI_CLIP_REQUIRED. " +
+                "Otherwise return only the finished prompt, " +
+                "under 1800 characters, without commentary.",
+            },
+          ],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2048,
+        },
+      }),
+    },
+  );
+
+  const data = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    logError(
+      "VIDEO PROMPT ERROR:",
+      new Error(JSON.stringify(data.error || {})),
+    );
+    throw new Error("VIDEO_PROMPT_PREPARATION_FAILED");
+  }
+
+  const candidate = data.candidates?.[0];
+
+  if (candidate?.finishReason !== "STOP") {
+    throw new Error("VIDEO_PROMPT_PREPARATION_FAILED");
+  }
+
+  const prepared = (candidate.content?.parts || [])
+    .filter(
+      (part) =>
+        !part.thought &&
+        typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("")
+    .trim();
+
+  if (prepared === "MULTI_CLIP_REQUIRED") {
+    throw new Error("VIDEO_MULTI_CLIP_REQUIRED");
+  }
+
+  if (!prepared || prepared.length > 2200) {
+    throw new Error("VIDEO_PROMPT_PREPARATION_FAILED");
+  }
+
+  return prepared;
+}
 
 async function createVeoLiteVideo(
   prompt,
   imageFile = null,
   attempt = 1,
+  onStage = async () => {},
 ) {
+  await onStage("preparing");
   const model = "veo-3.1-lite-generate-001";
   const projectId = "easyai-bc97f";
   const location = "us-central1";
@@ -569,7 +662,11 @@ async function createVeoLiteVideo(
     `projects/${projectId}/locations/${location}/` +
     `publishers/google/models/${model}`;
 
-  const instance = { prompt };
+  const preparedPrompt = await prepareVideoPrompt(prompt);
+
+const instance = {
+  prompt: preparedPrompt,
+};
 
   if (imageFile) {
     instance.image = {
@@ -590,7 +687,7 @@ async function createVeoLiteVideo(
     !!imageFile,
   );
 
-  const response = await fetchWithRetry(
+  const response = await fetch(
     `${modelUrl}:predictLongRunning`,
     {
       method: "POST",
@@ -601,8 +698,10 @@ async function createVeoLiteVideo(
       body: JSON.stringify({
         instances: [instance],
         parameters: {
-          resolution: "720p",
-          aspectRatio: imageFile ? "9:16" : "16:9",
+          resolution: "1080p",
+          aspectRatio:
+  prompt.match(/\b(16:9|9:16)\b/)?.[1] ||
+  (imageFile ? "9:16" : "16:9"),
           durationSeconds: 8,
         },
       }),
@@ -611,17 +710,28 @@ async function createVeoLiteVideo(
 
   const data = await response.json();
 
-  if (!response.ok) {
-    throw new Error(
-      `Veo video creation failed. HTTP ${response.status}`,
-    );
-  }
+ if (!response.ok) {
+  logError(
+    "VEO CREATE FAILED:",
+    new Error(
+      JSON.stringify({
+        httpStatus: response.status,
+        error: data.error || null,
+      }),
+    ),
+  );
+
+  throw new Error(
+    `Veo video creation failed. HTTP ${response.status}`,
+  );
+}
 
   const operationName = data?.name;
 
   if (!operationName) {
     throw new Error("Veo operation name missing");
   }
+  await onStage("generating");
 
   for (let i = 0; i < 120; i++) {
     await new Promise((resolve) =>
@@ -654,6 +764,25 @@ async function createVeoLiteVideo(
     }
 
     if (statusData?.done === true) {
+  if (statusData.error) {
+    logError(
+      "VEO GENERATION FAILED:",
+      new Error(JSON.stringify(statusData.error)),
+    );
+
+    throw new Error("VIDEO_PROVIDER_GENERATION_FAILED");
+  }
+
+  if (statusData.response?.raiMediaFilteredCount > 0) {
+    console.warn(
+      "VEO FILTER:",
+      JSON.stringify({
+        count: statusData.response.raiMediaFilteredCount,
+        reasons:
+          statusData.response.raiMediaFilteredReasons || [],
+      }),
+    );
+  }
       const video =
         statusData?.response?.generateVideoResponse
           ?.generatedSamples?.[0]?.video ||
@@ -674,9 +803,13 @@ async function createVeoLiteVideo(
             value.length > 1000,
         )?.[1];
 
-      if (videoUrl) return videoUrl;
+      if (videoUrl) {
+  await onStage("generated");
+  return videoUrl;
+}
 
       if (videoBase64) {
+        await onStage("generated");
         return (
           `data:${video?.mimeType || "video/mp4"};base64,` +
           videoBase64
@@ -823,12 +956,86 @@ app.post("/api/content-reports", async (req, res) => {
     });
   }
 });
+app.get("/api/video-status/:requestId", async (req, res) => {
+  try {
+    const requestId = req.params.requestId;
+
+    if (!/^[a-f0-9]{64}$/.test(requestId)) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_VIDEO_REQUEST_ID",
+      });
+    }
+
+    const authorization = req.headers.authorization;
+
+    const credential =
+      typeof authorization === "string" &&
+      authorization.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : "";
+
+    if (!/^[a-f0-9]{64}$/.test(credential)) {
+      return res.status(403).json({
+        success: false,
+        code: "DEVICE_SESSION_MISMATCH",
+      });
+    }
+
+    const credentialHash = crypto
+      .createHash("sha256")
+      .update(credential)
+      .digest("hex");
+
+    const snapshot = await db
+      .collection("videoGenerationStatus")
+      .doc(requestId)
+      .get();
+
+    const saved = snapshot.data();
+
+    if (!saved || saved.credentialHash !== credentialHash) {
+      return res.status(404).json({
+        success: false,
+        code: "VIDEO_STATUS_NOT_FOUND",
+      });
+    }
+
+    res.set("Cache-Control", "no-store");
+
+    return res.json({
+      success: true,
+      stage: saved.stage,
+    });
+  } catch (error) {
+    logError("VIDEO STATUS ERROR:", error);
+
+    return res.status(503).json({
+      success: false,
+      code: "VIDEO_STATUS_UNAVAILABLE",
+    });
+  }
+});
 
 app.post(
   "/api/generate-video",
   upload.single("image"),
   async (req, res) => {
     let reservation;
+let statusRef;
+
+const reportStage = async (stage) => {
+  if (!statusRef) return;
+
+  try {
+    await statusRef.update({
+      stage,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  } catch (error) {
+    logError("VIDEO STATUS UPDATE FAILED:", error);
+  }
+};
 
     try {
       const prompt =
@@ -836,7 +1043,7 @@ app.post(
           ? req.body.prompt.trim()
           : "";
 
-      if (!prompt || prompt.length > 2000) {
+      if (!prompt || prompt.length > 20000) {
         return res.status(400).json({
           success: false,
           code: "INVALID_VIDEO_PROMPT",
@@ -899,10 +1106,56 @@ app.post(
         );
       }
 
-      const remoteVideoUrl = await createVeoLiteVideo(
-        prompt,
-        req.file || null,
-      );
+      const requestId = req.body?.requestId;
+
+if (requestId !== undefined) {
+  if (
+    typeof requestId !== "string" ||
+    !/^[a-f0-9]{64}$/.test(requestId)
+  ) {
+    throw requestError(400, "INVALID_VIDEO_REQUEST_ID");
+  }
+
+  const authorization = req.headers.authorization;
+
+  const credential =
+    typeof authorization === "string" &&
+    authorization.startsWith("Bearer ")
+      ? authorization.slice(7)
+      : "";
+
+  if (!/^[a-f0-9]{64}$/.test(credential)) {
+    throw requestError(403, "DEVICE_SESSION_MISMATCH");
+  }
+
+  const credentialHash = crypto
+    .createHash("sha256")
+    .update(credential)
+    .digest("hex");
+
+  const ref = db
+    .collection("videoGenerationStatus")
+    .doc(requestId);
+
+  await ref.create({
+    deviceId,
+    credentialHash,
+    stage: "preparing",
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  statusRef = ref;
+}
+
+const remoteVideoUrl = await createVeoLiteVideo(
+  prompt,
+  req.file || null,
+  1,
+  reportStage,
+);
+
+await reportStage("saving");
 
       const fileName = await saveVideo(
         remoteVideoUrl,
@@ -916,6 +1169,7 @@ app.post(
         reservation,
         videoUrl,
       );
+      await reportStage("completed");
 
       return res.json({
         success: true,
@@ -925,6 +1179,7 @@ app.post(
         videoId,
       });
     } catch (error) {
+      await reportStage("failed");
       try {
         await refundVideoReservation(reservation);
       } catch (refundError) {
