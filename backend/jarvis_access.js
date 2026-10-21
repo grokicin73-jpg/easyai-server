@@ -654,12 +654,12 @@ export function createJarvisAccess(app) {
         throw fail(402, "JARVIS_CREDITS_REQUIRED");
       }
 
-      incrementDaily(
-        transaction,
+      transaction.set(
         daily,
-        dailySnapshot.data(),
-        "liveMinutes",
-        settings.dailyLiveMinutes,
+        {
+          liveMinutes: FieldValue.increment(1),
+        },
+        { merge: true },
       );
 
       const field = free
